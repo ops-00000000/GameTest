@@ -1,0 +1,13 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "chess-roguelike"
+main = "src/index.ts"
+compatibility_date = "2025-03-01"
+
+[durable_objects]
+bindings = [
+  { name = "GAME_ROOM", class_name = "GameRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GameRoom"]

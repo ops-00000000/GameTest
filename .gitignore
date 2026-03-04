@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.wrangler/
+*.js
+*.d.ts
+*.js.map
+!vite.config.ts
+
+# Keep source only
+packages/shared/dist/
