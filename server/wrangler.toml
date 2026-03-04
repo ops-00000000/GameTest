@@ -3,6 +3,10 @@ name = "chess-roguelike"
 main = "src/index.ts"
 compatibility_date = "2025-03-01"
 
+# Serve client static files from the same domain
+[assets]
+directory = "../client/dist"
+
 [durable_objects]
 bindings = [
   { name = "GAME_ROOM", class_name = "GameRoom" }
