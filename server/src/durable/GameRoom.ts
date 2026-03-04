@@ -25,6 +25,7 @@ export class GameRoom implements DurableObject {
     private seed: number = 0;
     private connections: Map<WebSocket, PlayerConnection> = new Map();
     private turnEvents: GameEvent[] = [];
+    private enemyPhaseRunning: boolean = false;  // guard against double enemy phase
 
     constructor(state: DurableObjectState, _env: unknown) {
         this.state = state;
@@ -125,6 +126,7 @@ export class GameRoom implements DurableObject {
 
     async alarm(): Promise<void> {
         if (!this.gameState || this.gameState.phase !== 'players') return;
+        if (this.enemyPhaseRunning) return;  // guard
 
         const alivePlayers = this.gameState.players.filter(p => p.alive);
         for (const player of alivePlayers) {
@@ -134,11 +136,16 @@ export class GameRoom implements DurableObject {
             }
         }
 
-        await this.runEnemyPhase();
-        this.startPlayerPhase();
-        this.broadcastViewsWithEvents(this.turnEvents);
-        this.turnEvents = [];
-        await this.saveState();
+        this.enemyPhaseRunning = true;
+        try {
+            await this.runEnemyPhase();
+            this.startPlayerPhase();
+            this.broadcastViewsWithEvents(this.turnEvents);
+            this.turnEvents = [];
+            await this.saveState();
+        } finally {
+            this.enemyPhaseRunning = false;
+        }
     }
 
     // ══════════════════════════════════════════════════
@@ -305,8 +312,8 @@ export class GameRoom implements DurableObject {
             player.upgrades.push(upgrade);
         }
 
-        // Special: ExtraLife activates the shield
-        if (upgrade === Upgrade.ExtraLife) {
+        // Special: ExtraLife / Armor activates the shield
+        if (upgrade === Upgrade.ExtraLife || upgrade === Upgrade.Armor) {
             player.hasExtraLife = true;
         }
 
@@ -413,6 +420,7 @@ export class GameRoom implements DurableObject {
 
     private async checkAllPlayersActed(): Promise<void> {
         if (!this.gameState || this.gameState.phase !== 'players') return;
+        if (this.enemyPhaseRunning) return;  // guard
 
         const alivePlayers = this.gameState.players.filter(p => p.alive);
         if (alivePlayers.length === 0) return;
@@ -420,15 +428,23 @@ export class GameRoom implements DurableObject {
         const allActed = alivePlayers.every(p => this.gameState!.playersActed.includes(p.id));
         if (!allActed) return;
 
+        // Cancel the turn timeout — we're handling it now
+        this.clearTurnTimeout();
+
         this.addLog(`━━━ Фаза противников ━━━`);
         this.gameState.phase = 'enemies';
         this.broadcastPhaseChange();
 
-        await this.runEnemyPhase();
-        this.startPlayerPhase();
-        this.broadcastViewsWithEvents(this.turnEvents);
-        this.turnEvents = [];
-        this.setTurnTimeout();
+        this.enemyPhaseRunning = true;
+        try {
+            await this.runEnemyPhase();
+            this.startPlayerPhase();
+            this.broadcastViewsWithEvents(this.turnEvents);
+            this.turnEvents = [];
+            this.setTurnTimeout();
+        } finally {
+            this.enemyPhaseRunning = false;
+        }
     }
 
     private async runEnemyPhase(): Promise<void> {
@@ -672,6 +688,10 @@ export class GameRoom implements DurableObject {
 
     private setTurnTimeout(): void {
         this.state.storage.setAlarm(Date.now() + TURN_TIMEOUT_MS);
+    }
+
+    private clearTurnTimeout(): void {
+        this.state.storage.deleteAlarm();
     }
 
     private addLog(msg: string): void {

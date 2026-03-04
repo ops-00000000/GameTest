@@ -43,10 +43,17 @@ export type PieceColor = 'white' | 'black';
 export enum Upgrade {
     DiagonalCapture = 'diagonal_capture',   // capture diagonally
     KnightLeap = 'knight_leap',         // move like a knight
-    BishopSlide = 'bishop_slide',        // move diagonally (sliding)
-    RookRush = 'rook_rush',           // move in straight lines (sliding)
+    BishopSlide = 'bishop_slide',        // move diagonally (sliding, 3 tiles)
+    RookRush = 'rook_rush',           // move in straight lines (sliding, 3 tiles)
     ExtraLife = 'extra_life',          // survive one capture
-    DoubleStep = 'double_step',         // move 2 tiles cardinally
+    DoubleStep = 'double_step',         // move 2 tiles forward
+    // New upgrades:
+    SideStep = 'side_step',           // move left/right
+    Retreat = 'retreat',             // move backward
+    ForwardCapture = 'forward_capture',    // capture by moving forward
+    Armor = 'armor',               // 2nd extra life shield
+    LongStride = 'long_stride',        // move 3 tiles forward
+    Swap = 'swap',                // jump 2 tiles in any direction
 }
 
 // ── Player & Enemy Pieces ─────────────────────────

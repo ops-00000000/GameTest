@@ -8,21 +8,42 @@ import { PieceType, Position, TileType, DungeonMap, Upgrade } from './types.js';
 export type MoveOffset = [number, number];
 export type MoveDirection = [number, number];
 
-// ── Player Pawn Offsets ───────────────────────────
+// ── Player Pawn Offsets (forward = up = -y) ───────
 
-const PAWN_MOVE_OFFSETS: MoveOffset[] = [
-    [0, -1], [0, 1], [-1, 0], [1, 0],   // 4 cardinal directions
+const PAWN_FORWARD: MoveOffset[] = [
+    [0, -1],   // forward only
 ];
 
-const PAWN_DOUBLE_OFFSETS: MoveOffset[] = [
-    [0, -2], [0, 2], [-2, 0], [2, 0],   // 2 tiles cardinal
+const PAWN_FORWARD_DOUBLE: MoveOffset[] = [
+    [0, -2],   // 2 tiles forward
+];
+
+const PAWN_FORWARD_TRIPLE: MoveOffset[] = [
+    [0, -3],   // 3 tiles forward
+];
+
+const PAWN_SIDE: MoveOffset[] = [
+    [-1, 0], [1, 0],   // left/right
+];
+
+const PAWN_BACK: MoveOffset[] = [
+    [0, 1],   // backward
 ];
 
 const PAWN_FORWARD_DIAG: MoveOffset[] = [
     [-1, -1], [1, -1],   // forward-diagonal (capture)
 ];
 
-const DIAGONAL_OFFSETS: MoveOffset[] = [
+const PAWN_SWAP_OFFSETS: MoveOffset[] = [
+    [0, -2], [0, 2], [-2, 0], [2, 0],
+    [-1, -1], [1, -1], [-1, 1], [1, 1],  // also diag 1 for variety
+    [-2, -2], [2, -2], [-2, 2], [2, 2],  // diag 2
+];
+
+// ── Shared Offsets (for enemies) ──────────────────
+
+const KING_OFFSETS: MoveOffset[] = [
+    [0, -1], [0, 1], [-1, 0], [1, 0],
     [-1, -1], [1, -1], [-1, 1], [1, 1],
 ];
 
@@ -30,14 +51,6 @@ const KNIGHT_OFFSETS: MoveOffset[] = [
     [-2, -1], [-1, -2], [1, -2], [2, -1],
     [2, 1], [1, 2], [-1, 2], [-2, 1],
 ];
-
-const KING_OFFSETS: MoveOffset[] = [
-    [-1, -1], [0, -1], [1, -1],
-    [-1, 0], [1, 0],
-    [-1, 1], [0, 1], [1, 1],
-];
-
-// ── Sliding Directions ────────────────────────────
 
 const DIAGONAL_DIRS: MoveDirection[] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
 const STRAIGHT_DIRS: MoveDirection[] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -90,7 +103,7 @@ function getSlidingMoves(
             const key = `${cx},${cy}`;
             if (occupiedByFriendly.has(key)) break;
             result.push({ x: cx, y: cy });
-            if (occupiedByEnemy.has(key)) break; // can capture but can't go further
+            if (occupiedByEnemy.has(key)) break;
             cx += dx;
             cy += dy;
             steps++;
@@ -103,8 +116,8 @@ function getSlidingMoves(
 
 /**
  * Get valid moves for the PLAYER (a pawn with upgrades).
- * Base: 4 cardinal directions.
- * Upgrades add more movement types.
+ * Base: forward only (up = -y).
+ * Upgrades progressively add more movement options.
  */
 export function getPlayerMoves(
     pos: Position,
@@ -128,23 +141,9 @@ export function getPlayerMoves(
         }
     };
 
-    // Base pawn: 4 cardinal directions
-    addUnique(getOffsetMoves(pos, PAWN_MOVE_OFFSETS, map, friendlySet));
-
-    // Forward diagonal capture: can capture enemies diagonally ahead (always available)
-    for (const [dx, dy] of PAWN_FORWARD_DIAG) {
-        const nx = pos.x + dx;
-        const ny = pos.y + dy;
-        const key = `${nx},${ny}`;
-        if (isWalkable(nx, ny, map) && enemySet.has(key) && !seen.has(key)) {
-            seen.add(key);
-            result.push({ x: nx, y: ny });
-        }
-    }
-
-    // Upgrade: Diagonal Capture — can also capture on backward diagonals
-    if (upgrades.includes(Upgrade.DiagonalCapture)) {
-        for (const [dx, dy] of [[- 1, 1], [1, 1]] as MoveOffset[]) {
+    /** Helper to add capture-only positions (only if enemy is present) */
+    const addCaptureOnly = (offsets: MoveOffset[]) => {
+        for (const [dx, dy] of offsets) {
             const nx = pos.x + dx;
             const ny = pos.y + dy;
             const key = `${nx},${ny}`;
@@ -153,26 +152,54 @@ export function getPlayerMoves(
                 result.push({ x: nx, y: ny });
             }
         }
+    };
+
+    // ─── Base pawn: forward only (1 tile up) ──────────
+    addUnique(getOffsetMoves(pos, PAWN_FORWARD, map, friendlySet));
+
+    // ─── Forward diagonal capture (always available) ──
+    addCaptureOnly(PAWN_FORWARD_DIAG);
+
+    // ─── Upgrades ─────────────────────────────────────
+
+    // SideStep: move left/right
+    if (upgrades.includes(Upgrade.SideStep)) {
+        addUnique(getOffsetMoves(pos, PAWN_SIDE, map, friendlySet));
     }
 
-    // Upgrade: Knight Leap
+    // Retreat: move backward
+    if (upgrades.includes(Upgrade.Retreat)) {
+        addUnique(getOffsetMoves(pos, PAWN_BACK, map, friendlySet));
+    }
+
+    // ForwardCapture: capture by moving forward (not just diagonal)
+    if (upgrades.includes(Upgrade.ForwardCapture)) {
+        addCaptureOnly(PAWN_FORWARD);
+    }
+
+    // DiagonalCapture: also capture on backward diagonals
+    if (upgrades.includes(Upgrade.DiagonalCapture)) {
+        addCaptureOnly([[-1, 1], [1, 1]] as MoveOffset[]);
+    }
+
+    // KnightLeap: L-shaped jumps
     if (upgrades.includes(Upgrade.KnightLeap)) {
         addUnique(getOffsetMoves(pos, KNIGHT_OFFSETS, map, friendlySet));
     }
 
-    // Upgrade: Bishop Slide (max 3 tiles)
+    // BishopSlide: diagonal sliding (max 3 tiles)
     if (upgrades.includes(Upgrade.BishopSlide)) {
         addUnique(getSlidingMoves(pos, DIAGONAL_DIRS, map, friendlySet, enemySet, 3));
     }
 
-    // Upgrade: Rook Rush (max 3 tiles)
+    // RookRush: straight sliding (max 3 tiles)
     if (upgrades.includes(Upgrade.RookRush)) {
         addUnique(getSlidingMoves(pos, STRAIGHT_DIRS, map, friendlySet, enemySet, 3));
     }
 
-    // Upgrade: Double Step — move 2 tiles cardinally (must have clear path)
+    // DoubleStep: move 2 tiles forward (must have clear path)
     if (upgrades.includes(Upgrade.DoubleStep)) {
-        for (const [dx, dy] of PAWN_DOUBLE_OFFSETS) {
+        for (const [dx, dy] of PAWN_FORWARD_DOUBLE) {
             const mx = pos.x + dx / 2;
             const my = pos.y + dy / 2;
             const nx = pos.x + dx;
@@ -189,6 +216,36 @@ export function getPlayerMoves(
                 result.push({ x: nx, y: ny });
             }
         }
+    }
+
+    // LongStride: move 3 tiles forward (must have clear path)
+    if (upgrades.includes(Upgrade.LongStride)) {
+        for (const [dx, dy] of PAWN_FORWARD_TRIPLE) {
+            const step1x = pos.x + (dx / 3);
+            const step1y = pos.y + (dy / 3);
+            const step2x = pos.x + (dx / 3) * 2;
+            const step2y = pos.y + (dy / 3) * 2;
+            const nx = pos.x + dx;
+            const ny = pos.y + dy;
+            const key = `${nx},${ny}`;
+            if (
+                isWalkable(step1x, step1y, map) &&
+                isWalkable(step2x, step2y, map) &&
+                isWalkable(nx, ny, map) &&
+                !friendlySet.has(`${step1x},${step1y}`) &&
+                !friendlySet.has(`${step2x},${step2y}`) &&
+                !friendlySet.has(key) &&
+                !seen.has(key)
+            ) {
+                seen.add(key);
+                result.push({ x: nx, y: ny });
+            }
+        }
+    }
+
+    // Swap (Teleport): jump 2 tiles in any direction
+    if (upgrades.includes(Upgrade.Swap)) {
+        addUnique(getOffsetMoves(pos, PAWN_SWAP_OFFSETS, map, friendlySet));
     }
 
     return result;
@@ -244,7 +301,7 @@ export function getAttackPositions(
     // Enemy pawns can attack on diagonal
     if (pieceType === PieceType.Pawn) {
         const result: Position[] = [];
-        for (const [dx, dy] of DIAGONAL_OFFSETS) {
+        for (const [dx, dy] of KING_OFFSETS) {
             const nx = pos.x + dx;
             const ny = pos.y + dy;
             if (isInBounds(nx, ny, map)) {

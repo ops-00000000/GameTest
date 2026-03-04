@@ -20,7 +20,6 @@ export const BASE_VIEW_RADIUS = 5;
 /** Turn timeout in ms (30 seconds) */
 export const TURN_TIMEOUT_MS = 30_000;
 
-
 /** Enemy count — lots of pieces on the board */
 export const ENEMIES_PER_FLOOR = (floor: number) => 8 + Math.floor(floor * 3);
 
@@ -42,12 +41,12 @@ export const UPGRADE_INFO: Record<Upgrade, { name: string; icon: string; desc: s
     [Upgrade.BishopSlide]: {
         name: 'Скольжение слона',
         icon: '♝',
-        desc: 'Движение по диагоналям',
+        desc: 'Скольжение по диагонали (до 3 клеток)',
     },
     [Upgrade.RookRush]: {
         name: 'Бросок ладьи',
         icon: '♜',
-        desc: 'Движение по прямым линиям',
+        desc: 'Скольжение по прямой (до 3 клеток)',
     },
     [Upgrade.ExtraLife]: {
         name: 'Вторая жизнь',
@@ -57,7 +56,37 @@ export const UPGRADE_INFO: Record<Upgrade, { name: string; icon: string; desc: s
     [Upgrade.DoubleStep]: {
         name: 'Двойной шаг',
         icon: '⏩',
-        desc: 'Ход на 2 клетки кардинально',
+        desc: 'Продвижение на 2 клетки вперёд',
+    },
+    [Upgrade.SideStep]: {
+        name: 'Боковой шаг',
+        icon: '↔',
+        desc: 'Движение влево и вправо',
+    },
+    [Upgrade.Retreat]: {
+        name: 'Отступление',
+        icon: '↩',
+        desc: 'Движение назад на 1 клетку',
+    },
+    [Upgrade.ForwardCapture]: {
+        name: 'Таран',
+        icon: '🗡',
+        desc: 'Захват врага прямо перед собой',
+    },
+    [Upgrade.Armor]: {
+        name: 'Броня',
+        icon: '🛡',
+        desc: 'Ещё один щит (как вторая жизнь)',
+    },
+    [Upgrade.LongStride]: {
+        name: 'Длинный шаг',
+        icon: '🏃',
+        desc: 'Ход на 3 клетки вперёд',
+    },
+    [Upgrade.Swap]: {
+        name: 'Телепорт',
+        icon: '⚡',
+        desc: 'Прыжок на 2 клетки в любом направлении',
     },
 };
 
