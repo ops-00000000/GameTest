@@ -9,7 +9,7 @@ import { CanvasRenderer } from './renderer/canvas.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { GameClientState } from './state/game-state.js';
 import {
-    ServerMessage, Position, Upgrade,
+    ServerMessage, Position, Upgrade, GameEvent,
     getPlayerMoves,
     CAPTURES_PER_UPGRADE, UPGRADE_INFO,
 } from '@chess-roguelike/shared';
@@ -43,6 +43,8 @@ const $defeatModal = document.getElementById('defeat-modal')!;
 const $defeatCaptures = document.getElementById('defeat-captures')!;
 const $defeatUpgrades = document.getElementById('defeat-upgrades')!;
 const $defeatTurns = document.getElementById('defeat-turns')!;
+const $defeatFloor = document.getElementById('defeat-floor')!;
+const $defeatKillerText = document.getElementById('defeat-killer-text')!;
 const $btnRestart = document.getElementById('btn-restart')!;
 
 // ── State ─────────────────────────────────────────
@@ -75,9 +77,6 @@ function init(): void {
             }
             case 'skip':
                 ws.send({ type: 'skip' });
-                break;
-            case 'descend':
-                ws.send({ type: 'descend' });
                 break;
             case 'chat_focus':
                 $chatInput.focus();
@@ -175,16 +174,25 @@ function handleServerMessage(msg: ServerMessage): void {
             break;
         }
         case 'turn_result': {
-            // Queue animations before updating view (so old positions are visible during anim)
+            // Queue animations before updating view
             if (msg.events && msg.events.length > 0) {
                 renderer.queueAnimations(msg.events);
             }
             state.updateView(msg.view);
             updateValidMoves();
             updateHUD();
-            // Check defeat
+            // Check defeat — delay 2.5s so player can see who killed them
             if (msg.view.myPiece && !msg.view.myPiece.alive) {
-                showDefeatScreen(msg.view.myPiece.captures, msg.view.myPiece.upgrades.length, msg.view.turnNumber);
+                const killerName = getKillerName(msg.events, state.playerId);
+                setTimeout(() => {
+                    showDefeatScreen(
+                        msg.view.myPiece.captures,
+                        msg.view.myPiece.upgrades.length,
+                        msg.view.turnNumber,
+                        msg.view.floor,
+                        killerName,
+                    );
+                }, 2500);
             }
             break;
         }
@@ -364,12 +372,35 @@ function showUpgradeModal(options: Upgrade[]): void {
     });
 }
 
-// ── Defeat Screen ─────────────────────────────────
+// ── Defeat Screen ─────────────────────────────────────
 
-function showDefeatScreen(captures: number, upgrades: number, turns: number): void {
+const PIECE_NAMES: Record<string, string> = {
+    pawn: 'Пешка', knight: 'Конь', bishop: 'Слон',
+    rook: 'Ладья', queen: 'Ферзь', king: 'Король',
+};
+
+function getKillerName(events: GameEvent[], playerId: string): string {
+    // Find the death event for this player
+    const deathEv = events.find(e => e.event === 'death' && e.pieceId === playerId);
+    if (!deathEv || deathEv.event !== 'death') return 'вражеская фигура';
+
+    // Try to find the killer in visible enemies
+    const killerId = deathEv.killedBy;
+    if (state.view) {
+        const killer = state.view.visibleEnemies.find(e => e.id === killerId);
+        if (killer) {
+            return PIECE_NAMES[killer.type] || killer.type;
+        }
+    }
+    return 'вражеская фигура';
+}
+
+function showDefeatScreen(captures: number, upgrades: number, turns: number, floor: number, killerName: string): void {
     $defeatCaptures.textContent = String(captures);
     $defeatUpgrades.textContent = String(upgrades);
     $defeatTurns.textContent = String(turns);
+    $defeatFloor.textContent = String(floor);
+    $defeatKillerText.textContent = `Вашу пешку захватила: ${killerName}`;
     $defeatModal.classList.remove('hidden');
 }
 
