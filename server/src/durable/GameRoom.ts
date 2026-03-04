@@ -7,12 +7,11 @@ import {
     GameState, PlayerPiece, EnemyPiece, PieceType, TileType, TurnPhase, Upgrade,
     ClientView, Tile, Position,
     ClientMessage, ServerMessage, GameEvent,
-    BASE_VIEW_RADIUS, MAX_PLAYERS, TURN_TIMEOUT_MS, CAPTURES_PER_UPGRADE, ALL_UPGRADES,
+    MAX_PLAYERS, TURN_TIMEOUT_MS, CAPTURES_PER_UPGRADE, ALL_UPGRADES,
 } from '@chess-roguelike/shared';
 import { isValidPlayerMove, getAttackPositions } from '@chess-roguelike/shared';
 import { generateDungeon, generateEnemies, getSpawnPosition } from '../game/world.js';
 import { playerCaptureEnemy, enemyCapturePlayer } from '../game/combat.js';
-import { computeFOV } from '../game/fov.js';
 import { getEnemyAction } from '../game/ai.js';
 
 interface PlayerConnection {
@@ -200,10 +199,16 @@ export class GameRoom implements DurableObject {
         this.gameState.players.push(player);
         this.connections.set(ws, { playerId, playerName });
 
-        this.addLog(`♟️ ${playerName} вступает в подземелье`);
+        this.addLog(`♟️ ${playerName} вступает в бой`);
 
         const view = this.buildClientView(playerId);
         this.send(ws, { type: 'snapshot', view, roomId: this.gameState.roomId, playerId });
+
+        // Initial upgrade choice: 3 options
+        const initialOptions = this.getUpgradeOptions(player, 3);
+        if (initialOptions.length > 0) {
+            this.send(ws, { type: 'upgrade_available', options: initialOptions });
+        }
 
         this.broadcast({
             type: 'player_joined',
@@ -252,7 +257,7 @@ export class GameRoom implements DurableObject {
 
             // Check if upgrade available
             if (player.captures % CAPTURES_PER_UPGRADE === 0) {
-                const options = this.getUpgradeOptions(player);
+                const options = this.getUpgradeOptions(player, 2);
                 if (options.length > 0) {
                     this.send(ws, { type: 'upgrade_available', options });
                     this.addLog(`⬆️ ${player.name} заслужил апгрейд!`);
@@ -495,23 +500,22 @@ export class GameRoom implements DurableObject {
     // UPGRADE SYSTEM
     // ══════════════════════════════════════════════════
 
-    /** Pick 2 random upgrades the player doesn't have yet */
-    private getUpgradeOptions(player: PlayerPiece): Upgrade[] {
+    /** Pick N random upgrades the player doesn't have yet */
+    private getUpgradeOptions(player: PlayerPiece, count: number = 2): Upgrade[] {
         const available = ALL_UPGRADES.filter(u => !player.upgrades.includes(u));
         if (available.length === 0) return [];
-        if (available.length <= 2) return [...available];
+        if (available.length <= count) return [...available];
 
-        // Pick 2 random
         const shuffled = [...available];
         for (let i = shuffled.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
-        return shuffled.slice(0, 2);
+        return shuffled.slice(0, count);
     }
 
     // ══════════════════════════════════════════════════
-    // VIEW BUILDING (fog of war)
+    // VIEW BUILDING (no fog of war — full board visible)
     // ══════════════════════════════════════════════════
 
     private buildClientView(playerId: string): ClientView {
@@ -520,31 +524,21 @@ export class GameRoom implements DurableObject {
 
         if (!player) return this.buildSpectatorView();
 
-        const viewRadius = BASE_VIEW_RADIUS +
-            (player.upgrades.includes(Upgrade.BishopSlide) ? 1 : 0) +
-            (player.upgrades.includes(Upgrade.RookRush) ? 1 : 0);
-
-        const visibleSet = computeFOV(player.pos, viewRadius, gs.map);
-
+        // All tiles visible (no FOV)
         const tiles: Tile[][] = [];
         for (let y = 0; y < gs.map.height; y++) {
             tiles[y] = [];
             for (let x = 0; x < gs.map.width; x++) {
-                const key = `${x},${y}`;
                 tiles[y][x] = {
                     type: gs.map.tiles[y][x],
-                    visible: visibleSet.has(key),
-                    explored: visibleSet.has(key),
+                    visible: true,
+                    explored: true,
                 };
             }
         }
 
-        const visiblePlayers = gs.players.filter(
-            p => p.alive && p.id !== playerId && visibleSet.has(`${p.pos.x},${p.pos.y}`)
-        );
-        const visibleEnemies = gs.enemies.filter(
-            e => e.alive && visibleSet.has(`${e.pos.x},${e.pos.y}`)
-        );
+        const visiblePlayers = gs.players.filter(p => p.alive && p.id !== playerId);
+        const visibleEnemies = gs.enemies.filter(e => e.alive);
 
         const alivePlayers = gs.players.filter(p => p.alive);
         const canAct = gs.phase === 'players' && player.alive && !gs.playersActed.includes(playerId);
