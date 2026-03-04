@@ -1,15 +1,14 @@
 // ═══════════════════════════════════════════════════
 // Chess Roguelike — Canvas Renderer
-// Chessboard-style dungeon with Unicode pieces
+// Chessboard-style dungeon with upgrade markers
 // ═══════════════════════════════════════════════════
 
-import { ClientView, Tile, TileType, PieceType, Position, PlayerPiece, EnemyPiece, Item } from '@chess-roguelike/shared';
+import { ClientView, Tile, TileType, PieceType, Position, Upgrade, UPGRADE_INFO } from '@chess-roguelike/shared';
 import { TILE_SIZE } from '@chess-roguelike/shared';
 
 // ── Color Palette ─────────────────────────────────
 
 const COLORS = {
-    // Tiles
     tileLight: '#2f2f4a',
     tileDark: '#222238',
     tileLightVisible: '#3d3d62',
@@ -20,25 +19,16 @@ const COLORS = {
     stairsDown: '#4a3a20',
     stairsUp: '#3a4a20',
     door: '#5a4a2a',
-
-    // Grid lines
     gridLine: 'rgba(60, 60, 100, 0.15)',
-
-    // Pieces
     whitePiece: '#eeeef8',
     whitePieceShadow: 'rgba(100, 100, 255, 0.4)',
     blackPiece: '#dd4444',
     blackPieceShadow: 'rgba(255, 50, 50, 0.4)',
-
-    // Highlights
     validMove: 'rgba(68, 204, 68, 0.35)',
     validMoveStroke: 'rgba(68, 204, 68, 0.6)',
     selectedTile: 'rgba(255, 215, 0, 0.4)',
     myTurnGlow: 'rgba(68, 204, 68, 0.15)',
-    itemGlow: 'rgba(255, 215, 0, 0.5)',
-
-    // Items
-    item: '#ffd700',
+    extraLifeGlow: 'rgba(255, 100, 100, 0.3)',
 };
 
 // ── Piece Symbols ─────────────────────────────────
@@ -51,13 +41,6 @@ const WHITE_SYMBOLS: Record<string, string> = {
 const BLACK_SYMBOLS: Record<string, string> = {
     pawn: '♟', knight: '♞', bishop: '♝',
     rook: '♜', queen: '♛', king: '♚',
-};
-
-const ITEM_SYMBOLS: Record<string, string> = {
-    health_potion: '❤',
-    attack_boost: '⚔',
-    defense_boost: '🛡',
-    promotion_token: '👑',
 };
 
 // ── Renderer ──────────────────────────────────────
@@ -90,9 +73,6 @@ export class CanvasRenderer {
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    /**
-     * Main render function — draws everything based on client view.
-     */
     render(
         view: ClientView,
         validMoves: Position[],
@@ -102,13 +82,11 @@ export class CanvasRenderer {
         const w = canvas.clientWidth;
         const h = canvas.clientHeight;
 
-        // Clear
         ctx.fillStyle = '#08080f';
         ctx.fillRect(0, 0, w, h);
 
         if (!view || !view.myPiece) return;
 
-        // Smoothly follow player
         this.targetCameraX = view.myPiece.pos.x * this.tileSize - w / 2 + this.tileSize / 2;
         this.targetCameraY = view.myPiece.pos.y * this.tileSize - h / 2 + this.tileSize / 2;
         this.cameraX += (this.targetCameraX - this.cameraX) * 0.15;
@@ -117,7 +95,6 @@ export class CanvasRenderer {
         ctx.save();
         ctx.translate(-Math.round(this.cameraX), -Math.round(this.cameraY));
 
-        // Calculate visible tile range
         const startX = Math.max(0, Math.floor(this.cameraX / this.tileSize) - 1);
         const startY = Math.max(0, Math.floor(this.cameraY / this.tileSize) - 1);
         const endX = Math.min(view.mapWidth, Math.ceil((this.cameraX + w) / this.tileSize) + 1);
@@ -142,26 +119,20 @@ export class CanvasRenderer {
             this.drawHighlight(hoveredTile.x, hoveredTile.y, COLORS.selectedTile, COLORS.selectedTile);
         }
 
-        // Draw items
-        for (const item of view.visibleItems) {
-            if (item.pos) {
-                this.drawItem(item);
-            }
-        }
-
-        // Draw enemies
+        // Draw enemies — standard chess pieces
         for (const enemy of view.visibleEnemies) {
-            this.drawPiece(enemy.pos.x, enemy.pos.y, enemy.type, 'black', enemy.stats.hp, enemy.stats.maxHp);
+            this.drawPiece(enemy.pos.x, enemy.pos.y, enemy.type, 'black');
         }
 
         // Draw other players
         for (const player of view.visiblePlayers) {
-            this.drawPiece(player.pos.x, player.pos.y, player.type, 'white', player.stats.hp, player.stats.maxHp);
+            this.drawPiece(player.pos.x, player.pos.y, player.type, 'white');
         }
 
-        // Draw my piece (always on top)
+        // Draw my piece (always on top) with upgrade markers
         const me = view.myPiece;
-        // Glow when it's my turn
+
+        // Turn glow
         if (view.canAct) {
             ctx.fillStyle = COLORS.myTurnGlow;
             ctx.beginPath();
@@ -173,7 +144,26 @@ export class CanvasRenderer {
             );
             ctx.fill();
         }
-        this.drawPiece(me.pos.x, me.pos.y, me.type, 'white', me.stats.hp, me.stats.maxHp, true);
+
+        // Extra life glow
+        if (me.hasExtraLife) {
+            ctx.fillStyle = COLORS.extraLifeGlow;
+            ctx.beginPath();
+            ctx.arc(
+                me.pos.x * this.tileSize + this.tileSize / 2,
+                me.pos.y * this.tileSize + this.tileSize / 2,
+                this.tileSize * 0.6,
+                0, Math.PI * 2,
+            );
+            ctx.fill();
+        }
+
+        this.drawPiece(me.pos.x, me.pos.y, me.type, 'white', true);
+
+        // Draw upgrade markers around player
+        if (me.upgrades.length > 0) {
+            this.drawUpgradeMarkers(me.pos.x, me.pos.y, me.upgrades);
+        }
 
         ctx.restore();
     }
@@ -185,7 +175,6 @@ export class CanvasRenderer {
         const isChessLight = (x + y) % 2 === 0;
 
         if (!tile.visible && !tile.explored) {
-            // Completely fog
             ctx.fillStyle = COLORS.tileFog;
             ctx.fillRect(px, py, this.tileSize, this.tileSize);
             return;
@@ -194,8 +183,6 @@ export class CanvasRenderer {
         if (tile.type === TileType.Wall) {
             ctx.fillStyle = tile.visible ? COLORS.wallVisible : COLORS.wall;
             ctx.fillRect(px, py, this.tileSize, this.tileSize);
-
-            // Wall pattern
             if (tile.visible) {
                 ctx.strokeStyle = 'rgba(40, 40, 70, 0.3)';
                 ctx.lineWidth = 0.5;
@@ -204,23 +191,20 @@ export class CanvasRenderer {
             return;
         }
 
-        // Floor tiles
         if (tile.visible) {
             ctx.fillStyle = isChessLight ? COLORS.tileLightVisible : COLORS.tileDarkVisible;
         } else {
-            // Explored but not visible — dimmed
             ctx.fillStyle = isChessLight ? COLORS.tileLight : COLORS.tileDark;
             ctx.globalAlpha = 0.4;
         }
         ctx.fillRect(px, py, this.tileSize, this.tileSize);
         ctx.globalAlpha = 1;
 
-        // Stairs
         if (tile.type === TileType.StairsDown && tile.visible) {
             ctx.fillStyle = COLORS.stairsDown;
             ctx.fillRect(px + 2, py + 2, this.tileSize - 4, this.tileSize - 4);
             ctx.fillStyle = '#ccaa55';
-            ctx.font = `${this.tileSize * 0.6}px ${getComputedStyle(document.body).getPropertyValue('--font-mono') || 'monospace'}`;
+            ctx.font = `${this.tileSize * 0.6}px monospace`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('▼', px + this.tileSize / 2, py + this.tileSize / 2);
@@ -234,7 +218,6 @@ export class CanvasRenderer {
             ctx.fillText('▲', px + this.tileSize / 2, py + this.tileSize / 2);
         }
 
-        // Subtle grid line
         if (tile.visible) {
             ctx.strokeStyle = COLORS.gridLine;
             ctx.lineWidth = 0.5;
@@ -245,7 +228,6 @@ export class CanvasRenderer {
     private drawPiece(
         x: number, y: number,
         type: PieceType, color: 'white' | 'black',
-        hp: number, maxHp: number,
         isMe: boolean = false,
     ): void {
         const { ctx } = this;
@@ -256,11 +238,9 @@ export class CanvasRenderer {
         const pieceColor = color === 'white' ? COLORS.whitePiece : COLORS.blackPiece;
         const shadowColor = color === 'white' ? COLORS.whitePieceShadow : COLORS.blackPieceShadow;
 
-        // Glow shadow
         ctx.shadowColor = shadowColor;
         ctx.shadowBlur = isMe ? 12 : 6;
 
-        // Draw piece symbol
         ctx.fillStyle = pieceColor;
         ctx.font = `${this.tileSize * 0.75}px serif`;
         ctx.textAlign = 'center';
@@ -269,21 +249,6 @@ export class CanvasRenderer {
 
         ctx.shadowBlur = 0;
 
-        // HP bar below piece (if damaged)
-        if (hp < maxHp) {
-            const barW = this.tileSize - 4;
-            const barH = 3;
-            const barX = x * this.tileSize + 2;
-            const barY = y * this.tileSize + this.tileSize - 4;
-            const ratio = Math.max(0, hp / maxHp);
-
-            ctx.fillStyle = 'rgba(0,0,0,0.5)';
-            ctx.fillRect(barX, barY, barW, barH);
-            ctx.fillStyle = ratio > 0.5 ? '#44cc44' : ratio > 0.25 ? '#ccaa44' : '#cc4444';
-            ctx.fillRect(barX, barY, barW * ratio, barH);
-        }
-
-        // "Me" indicator
         if (isMe) {
             ctx.strokeStyle = COLORS.whitePiece;
             ctx.lineWidth = 1.5;
@@ -293,24 +258,35 @@ export class CanvasRenderer {
         }
     }
 
-    private drawItem(item: Item): void {
-        if (!item.pos) return;
+    /** Draw small upgrade icons around the player piece */
+    private drawUpgradeMarkers(x: number, y: number, upgrades: Upgrade[]): void {
         const { ctx } = this;
-        const px = item.pos.x * this.tileSize + this.tileSize / 2;
-        const py = item.pos.y * this.tileSize + this.tileSize / 2;
+        const cx = x * this.tileSize + this.tileSize / 2;
+        const cy = y * this.tileSize + this.tileSize / 2;
+        const radius = this.tileSize * 0.45;
+        const count = upgrades.length;
 
-        // Pulsing glow
-        const pulse = 0.6 + Math.sin(Date.now() / 500) * 0.3;
-        ctx.shadowColor = COLORS.itemGlow;
-        ctx.shadowBlur = 6 * pulse;
+        for (let i = 0; i < count; i++) {
+            const angle = (i / Math.max(count, 4)) * Math.PI * 2 - Math.PI / 2;
+            const mx = cx + Math.cos(angle) * radius;
+            const my = cy + Math.sin(angle) * radius;
 
-        ctx.fillStyle = COLORS.item;
-        ctx.font = `${this.tileSize * 0.5}px serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(ITEM_SYMBOLS[item.type] ?? '?', px, py);
+            const info = UPGRADE_INFO[upgrades[i]];
+            if (!info) continue;
 
-        ctx.shadowBlur = 0;
+            // Background circle
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.beginPath();
+            ctx.arc(mx, my, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Icon
+            ctx.fillStyle = '#ffdd88';
+            ctx.font = '7px serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(info.icon, mx, my);
+        }
     }
 
     private drawHighlight(x: number, y: number, fill: string, stroke: string): void {
@@ -325,14 +301,12 @@ export class CanvasRenderer {
         ctx.lineWidth = 1;
         ctx.strokeRect(px + 1, py + 1, this.tileSize - 2, this.tileSize - 2);
 
-        // Dot in center
         ctx.fillStyle = stroke;
         ctx.beginPath();
         ctx.arc(px + this.tileSize / 2, py + this.tileSize / 2, 3, 0, Math.PI * 2);
         ctx.fill();
     }
 
-    /** Get tile coords from mouse position */
     getTileFromMouse(mouseX: number, mouseY: number): Position {
         return {
             x: Math.floor((mouseX + this.cameraX) / this.tileSize),

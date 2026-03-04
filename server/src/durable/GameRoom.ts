@@ -1,20 +1,17 @@
 // ═══════════════════════════════════════════════════
 // Chess Roguelike — GameRoom Durable Object
-// Phase-based turn system:
-//   1. PLAYERS phase — all players submit actions
-//   2. ENEMIES phase — all enemies act (server-side)
-//   3. Back to PLAYERS phase
+// Phase-based turn system with pawn upgrades
 // ═══════════════════════════════════════════════════
 
 import {
-    GameState, PlayerPiece, EnemyPiece, PieceType, TileType, TurnPhase,
-    ClientView, Tile, Position, Item,
+    GameState, PlayerPiece, EnemyPiece, PieceType, TileType, TurnPhase, Upgrade,
+    ClientView, Tile, Position,
     ClientMessage, ServerMessage, GameEvent,
-    VIEW_RADIUS, MAX_PLAYERS, TURN_TIMEOUT_MS, BASE_STATS, PROMOTION_XP,
+    BASE_VIEW_RADIUS, MAX_PLAYERS, TURN_TIMEOUT_MS, CAPTURES_PER_UPGRADE, ALL_UPGRADES,
 } from '@chess-roguelike/shared';
-import { isValidMove, getAttackPositions } from '@chess-roguelike/shared';
-import { generateDungeon, generateEnemies, generateItems, getSpawnPosition } from '../game/world.js';
-import { playerCaptureEnemy, enemyCapturePlayer, promotePlayer, getPromotionOptions } from '../game/combat.js';
+import { isValidPlayerMove, getAttackPositions } from '@chess-roguelike/shared';
+import { generateDungeon, generateEnemies, getSpawnPosition } from '../game/world.js';
+import { playerCaptureEnemy, enemyCapturePlayer } from '../game/combat.js';
 import { computeFOV } from '../game/fov.js';
 import { getEnemyAction } from '../game/ai.js';
 
@@ -28,7 +25,6 @@ export class GameRoom implements DurableObject {
     private gameState: GameState | null = null;
     private seed: number = 0;
     private connections: Map<WebSocket, PlayerConnection> = new Map();
-    // Accumulate events during a full turn cycle for broadcasting
     private turnEvents: GameEvent[] = [];
 
     constructor(state: DurableObjectState, _env: unknown) {
@@ -49,6 +45,7 @@ export class GameRoom implements DurableObject {
                     name: p.name,
                     type: p.type,
                     alive: p.alive,
+                    captures: p.captures,
                 })) ?? [],
                 floor: this.gameState?.floor ?? 0,
                 phase: this.gameState?.phase ?? 'players',
@@ -85,17 +82,8 @@ export class GameRoom implements DurableObject {
             case 'move':
                 await this.handleMove(ws, message.to);
                 break;
-            case 'attack':
-                await this.handleAttack(ws, message.targetId);
-                break;
-            case 'pickup':
-                await this.handlePickup(ws);
-                break;
-            case 'use_item':
-                await this.handleUseItem(ws, message.itemId);
-                break;
-            case 'promote':
-                await this.handlePromote(ws, message.pieceType);
+            case 'choose_upgrade':
+                await this.handleChooseUpgrade(ws, message.upgrade);
                 break;
             case 'descend':
                 await this.handleDescend(ws);
@@ -125,8 +113,6 @@ export class GameRoom implements DurableObject {
 
             this.addLog(`${conn.playerName} покинул подземелье`);
             this.connections.delete(ws);
-
-            // Check if all remaining players have acted
             await this.checkAllPlayersActed();
             await this.saveState();
         }
@@ -141,7 +127,6 @@ export class GameRoom implements DurableObject {
     async alarm(): Promise<void> {
         if (!this.gameState || this.gameState.phase !== 'players') return;
 
-        // Auto-skip for all players who haven't acted
         const alivePlayers = this.gameState.players.filter(p => p.alive);
         for (const player of alivePlayers) {
             if (!this.gameState.playersActed.includes(player.id)) {
@@ -150,7 +135,6 @@ export class GameRoom implements DurableObject {
             }
         }
 
-        // Force transition to enemy phase
         await this.runEnemyPhase();
         this.startPlayerPhase();
         this.broadcastViewsWithEvents(this.turnEvents);
@@ -163,12 +147,10 @@ export class GameRoom implements DurableObject {
     // ══════════════════════════════════════════════════
 
     private async handleJoin(ws: WebSocket, playerName: string): Promise<void> {
-        // Initialize game state on first join
         if (!this.gameState) {
             this.seed = Date.now();
             const map = generateDungeon(1, this.seed);
             const enemies = generateEnemies(map, 1, this.seed);
-            const items = generateItems(map, 1, this.seed);
 
             this.gameState = {
                 roomId: '',
@@ -176,7 +158,6 @@ export class GameRoom implements DurableObject {
                 map,
                 players: [],
                 enemies,
-                items,
                 phase: 'players',
                 playersActed: [],
                 turnNumber: 1,
@@ -199,10 +180,9 @@ export class GameRoom implements DurableObject {
             return;
         }
 
-        // Create new player as Pawn
+        // Create new player — always a Pawn
         const playerId = `player-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const spawnPos = getSpawnPosition(this.gameState.map);
-        const base = BASE_STATS[PieceType.Pawn];
 
         const player: PlayerPiece = {
             id: playerId,
@@ -210,8 +190,9 @@ export class GameRoom implements DurableObject {
             type: PieceType.Pawn,
             color: 'white',
             pos: { ...spawnPos },
-            stats: { hp: base.hp, maxHp: base.hp, attack: base.attack, defense: base.defense, xp: 0 },
-            inventory: [],
+            captures: 0,
+            upgrades: [],
+            hasExtraLife: false,
             floor: 1,
             alive: true,
         };
@@ -219,13 +200,11 @@ export class GameRoom implements DurableObject {
         this.gameState.players.push(player);
         this.connections.set(ws, { playerId, playerName });
 
-        this.addLog(`♟️ ${playerName} присоединился как Пешка`);
+        this.addLog(`♟️ ${playerName} вступает в подземелье`);
 
-        // Send snapshot
         const view = this.buildClientView(playerId);
         this.send(ws, { type: 'snapshot', view, roomId: this.gameState.roomId, playerId });
 
-        // Notify others
         this.broadcast({
             type: 'player_joined',
             playerName,
@@ -237,13 +216,12 @@ export class GameRoom implements DurableObject {
         this.setTurnTimeout();
     }
 
-    // ── Player Action: Move ───────────────────────────
+    // ── Player Action: Move (with auto-capture) ──────
 
     private async handleMove(ws: WebSocket, to: Position): Promise<void> {
         const conn = this.connections.get(ws);
         if (!conn || !this.gameState) return;
 
-        // Check phase and whether player already acted
         if (!this.canPlayerAct(conn.playerId)) {
             this.send(ws, { type: 'error', message: 'Вы уже сделали ход в этой фазе' });
             return;
@@ -252,28 +230,33 @@ export class GameRoom implements DurableObject {
         const player = this.gameState.players.find(p => p.id === conn.playerId);
         if (!player || !player.alive) return;
 
-        // Validate move using chess rules
+        // Validate move with upgrades
         const friendlyPositions = this.gameState.players
             .filter(p => p.alive && p.id !== player.id).map(p => p.pos);
         const enemyPositions = this.gameState.enemies
             .filter(e => e.alive).map(e => e.pos);
 
-        if (!isValidMove(player.type, player.pos, to, this.gameState.map, friendlyPositions, enemyPositions)) {
+        if (!isValidPlayerMove(player.pos, to, this.gameState.map, friendlyPositions, enemyPositions, player.upgrades)) {
             this.send(ws, { type: 'error', message: 'Невалидный ход' });
             return;
         }
 
         const events: GameEvent[] = [];
 
-        // Check if capture (enemy at destination) — chess style: instant removal
+        // Check if capture (enemy at destination)
         const targetEnemy = this.gameState.enemies.find(e => e.alive && e.pos.x === to.x && e.pos.y === to.y);
         if (targetEnemy) {
-            const result = playerCaptureEnemy(player, targetEnemy);
+            playerCaptureEnemy(player, targetEnemy);
             events.push({ event: 'death', pieceId: targetEnemy.id, killedBy: player.id });
-            this.addLog(`⚔️ ${player.name} захватил ${this.pieceName(targetEnemy.type)}! (+${result.xpGained} XP)`);
-            if (result.canPromote) {
-                this.send(ws, { type: 'promotion_available', options: getPromotionOptions(player.type) });
-                this.addLog(`👑 ${player.name} может повыситься!`);
+            this.addLog(`⚔️ ${player.name} захватил ${this.pieceName(targetEnemy.type)}! (${player.captures} всего)`);
+
+            // Check if upgrade available
+            if (player.captures % CAPTURES_PER_UPGRADE === 0) {
+                const options = this.getUpgradeOptions(player);
+                if (options.length > 0) {
+                    this.send(ws, { type: 'upgrade_available', options });
+                    this.addLog(`⬆️ ${player.name} заслужил апгрейд!`);
+                }
             }
         }
 
@@ -281,64 +264,42 @@ export class GameRoom implements DurableObject {
         const from = { ...player.pos };
         player.pos = { ...to };
         events.unshift({ event: 'move', pieceId: player.id, from, to });
-        this.addLog(`${this.pieceSymbol(player.type)} ${player.name}: ${this.posStr(from)} → ${this.posStr(to)}`);
 
         // Mark player as acted
         this.markPlayerActed(conn.playerId);
         this.turnEvents.push(...events);
-
-        // Broadcast updated state (so other players see the move immediately)
         this.broadcastPhaseStatus();
-
-        // Check if all players have acted → trigger enemy phase
         await this.checkAllPlayersActed();
         await this.saveState();
     }
 
-    // ── Player Action: Attack ─────────────────────────
+    // ── Player Action: Choose Upgrade ─────────────────
 
-    private async handleAttack(ws: WebSocket, targetId: string): Promise<void> {
+    private async handleChooseUpgrade(ws: WebSocket, upgrade: Upgrade): Promise<void> {
         const conn = this.connections.get(ws);
         if (!conn || !this.gameState) return;
-
-        if (!this.canPlayerAct(conn.playerId)) {
-            this.send(ws, { type: 'error', message: 'Вы уже сделали ход в этой фазе' });
-            return;
-        }
 
         const player = this.gameState.players.find(p => p.id === conn.playerId);
         if (!player || !player.alive) return;
 
-        const target = this.gameState.enemies.find(e => e.id === targetId && e.alive);
-        if (!target) {
-            this.send(ws, { type: 'error', message: 'Цель не найдена' });
+        // Validate upgrade choice
+        if (!ALL_UPGRADES.includes(upgrade)) {
+            this.send(ws, { type: 'error', message: 'Невалидный апгрейд' });
             return;
         }
 
-        const attackPositions = getAttackPositions(player.type, player.pos, this.gameState.map);
-        if (!attackPositions.some(ap => ap.x === target.pos.x && ap.y === target.pos.y)) {
-            this.send(ws, { type: 'error', message: 'Цель вне досягаемости' });
-            return;
+        // Apply upgrade
+        if (!player.upgrades.includes(upgrade)) {
+            player.upgrades.push(upgrade);
         }
 
-        // Chess-style capture: instant kill, move to target square
-        const result = playerCaptureEnemy(player, target);
-        const events: GameEvent[] = [{ event: 'death', pieceId: target.id, killedBy: player.id }];
-        this.addLog(`⚔️ ${player.name} захватил ${this.pieceName(target.type)}! (+${result.xpGained} XP)`);
-
-        // Move player to captured square
-        const from = { ...player.pos };
-        player.pos = { ...target.pos };
-        events.push({ event: 'move', pieceId: player.id, from, to: target.pos });
-
-        if (result.canPromote) {
-            this.send(ws, { type: 'promotion_available', options: getPromotionOptions(player.type) });
+        // Special: ExtraLife activates the shield
+        if (upgrade === Upgrade.ExtraLife) {
+            player.hasExtraLife = true;
         }
 
-        this.markPlayerActed(conn.playerId);
-        this.turnEvents.push(...events);
-        this.broadcastPhaseStatus();
-        await this.checkAllPlayersActed();
+        this.addLog(`⬆️ ${player.name} получил: ${this.upgradeName(upgrade)}`);
+        this.broadcastViews();
         await this.saveState();
     }
 
@@ -355,7 +316,7 @@ export class GameRoom implements DurableObject {
 
         const player = this.gameState.players.find(p => p.id === conn.playerId);
         if (player) {
-            this.addLog(`${this.pieceSymbol(player.type)} ${player.name} пропустил ход`);
+            this.addLog(`♟ ${player.name} пропустил ход`);
         }
 
         this.markPlayerActed(conn.playerId);
@@ -364,87 +325,7 @@ export class GameRoom implements DurableObject {
         await this.saveState();
     }
 
-    // ── Free Actions (don't consume turn) ─────────────
-
-    private async handlePickup(ws: WebSocket): Promise<void> {
-        const conn = this.connections.get(ws);
-        if (!conn || !this.gameState) return;
-
-        const player = this.gameState.players.find(p => p.id === conn.playerId);
-        if (!player || !player.alive) return;
-
-        const itemIndex = this.gameState.items.findIndex(
-            item => item.pos && item.pos.x === player.pos.x && item.pos.y === player.pos.y
-        );
-        if (itemIndex === -1) {
-            this.send(ws, { type: 'error', message: 'Здесь нет предметов' });
-            return;
-        }
-
-        const item = this.gameState.items[itemIndex];
-        this.gameState.items.splice(itemIndex, 1);
-        item.pos = undefined;
-        player.inventory.push(item);
-        this.addLog(`${player.name} подобрал ${item.name}`);
-        this.broadcastViews();
-        await this.saveState();
-    }
-
-    private async handleUseItem(ws: WebSocket, itemId: string): Promise<void> {
-        const conn = this.connections.get(ws);
-        if (!conn || !this.gameState) return;
-
-        const player = this.gameState.players.find(p => p.id === conn.playerId);
-        if (!player || !player.alive) return;
-
-        const itemIndex = player.inventory.findIndex(i => i.id === itemId);
-        if (itemIndex === -1) return;
-
-        const item = player.inventory[itemIndex];
-        player.inventory.splice(itemIndex, 1);
-
-        switch (item.type) {
-            case 'health_potion':
-                player.stats.hp = Math.min(player.stats.maxHp, player.stats.hp + item.value);
-                this.addLog(`❤️ ${player.name} использовал ${item.name}: +${item.value} HP`);
-                break;
-            case 'attack_boost':
-                player.stats.attack += item.value;
-                this.addLog(`⚔️ ${player.name} использовал ${item.name}: +${item.value} ATK`);
-                break;
-            case 'defense_boost':
-                player.stats.defense += item.value;
-                this.addLog(`🛡️ ${player.name} использовал ${item.name}: +${item.value} DEF`);
-                break;
-        }
-        this.broadcastViews();
-        await this.saveState();
-    }
-
-    private async handlePromote(ws: WebSocket, newType: PieceType): Promise<void> {
-        const conn = this.connections.get(ws);
-        if (!conn || !this.gameState) return;
-
-        const player = this.gameState.players.find(p => p.id === conn.playerId);
-        if (!player || !player.alive) return;
-
-        if (player.stats.xp < PROMOTION_XP) {
-            this.send(ws, { type: 'error', message: 'Недостаточно XP для повышения' });
-            return;
-        }
-
-        const options = getPromotionOptions(player.type);
-        if (!options.includes(newType)) {
-            this.send(ws, { type: 'error', message: 'Невалидный выбор' });
-            return;
-        }
-
-        const oldType = player.type;
-        promotePlayer(player, newType);
-        this.addLog(`👑 ${player.name}: ${this.pieceSymbol(oldType)} → ${this.pieceSymbol(newType)}`);
-        this.broadcastViews();
-        await this.saveState();
-    }
+    // ── Descend to next floor ─────────────────────────
 
     private async handleDescend(ws: WebSocket): Promise<void> {
         const conn = this.connections.get(ws);
@@ -462,15 +343,12 @@ export class GameRoom implements DurableObject {
         const newFloor = this.gameState.floor + 1;
         const newMap = generateDungeon(newFloor, this.seed);
         const newEnemies = generateEnemies(newMap, newFloor, this.seed);
-        const newItems = generateItems(newMap, newFloor, this.seed);
         const spawnPos = getSpawnPosition(newMap);
 
         this.gameState.floor = newFloor;
         this.gameState.map = newMap;
         this.gameState.enemies = newEnemies;
-        this.gameState.items = newItems;
 
-        // Move all alive players to spawn
         for (let i = 0; i < this.gameState.players.length; i++) {
             const p = this.gameState.players[i];
             if (p.alive) {
@@ -479,13 +357,11 @@ export class GameRoom implements DurableObject {
             }
         }
 
-        // Reset to new player phase
         this.gameState.phase = 'players';
         this.gameState.playersActed = [];
 
         this.addLog(`🏰 Спуск на этаж ${newFloor}!`);
 
-        // Full re-snapshot for all clients
         for (const [socket, connection] of this.connections) {
             const view = this.buildClientView(connection.playerId);
             this.send(socket, { type: 'snapshot', view, roomId: this.gameState.roomId, playerId: connection.playerId });
@@ -510,14 +386,12 @@ export class GameRoom implements DurableObject {
     // PHASE-BASED TURN SYSTEM
     // ══════════════════════════════════════════════════
 
-    /** Check if a player can act right now */
     private canPlayerAct(playerId: string): boolean {
         if (!this.gameState) return false;
         if (this.gameState.phase !== 'players') return false;
         return !this.gameState.playersActed.includes(playerId);
     }
 
-    /** Mark a player as having submitted their action */
     private markPlayerActed(playerId: string): void {
         if (!this.gameState) return;
         if (!this.gameState.playersActed.includes(playerId)) {
@@ -525,7 +399,6 @@ export class GameRoom implements DurableObject {
         }
     }
 
-    /** Check if all alive players have acted — if so, run enemy phase */
     private async checkAllPlayersActed(): Promise<void> {
         if (!this.gameState || this.gameState.phase !== 'players') return;
 
@@ -535,24 +408,19 @@ export class GameRoom implements DurableObject {
         const allActed = alivePlayers.every(p => this.gameState!.playersActed.includes(p.id));
         if (!allActed) return;
 
-        // ── All players acted → Run enemy phase ──
         this.addLog(`━━━ Фаза противников ━━━`);
         this.gameState.phase = 'enemies';
         this.broadcastPhaseChange();
 
         await this.runEnemyPhase();
-
-        // ── Start new player phase ──
         this.startPlayerPhase();
         this.broadcastViewsWithEvents(this.turnEvents);
         this.turnEvents = [];
         this.setTurnTimeout();
     }
 
-    /** Execute all enemy actions */
     private async runEnemyPhase(): Promise<void> {
         if (!this.gameState) return;
-
         const events: GameEvent[] = [];
 
         for (const enemy of this.gameState.enemies) {
@@ -573,15 +441,19 @@ export class GameRoom implements DurableObject {
                     break;
                 }
                 case 'attack': {
-                    // Chess-style capture: enemy moves to player's square, player dies
                     const target = this.gameState.players.find(p => p.id === action.targetId);
                     if (target && target.alive) {
+                        const died = enemyCapturePlayer(enemy, target);
                         const from = { ...enemy.pos };
-                        enemyCapturePlayer(enemy, target);
-                        enemy.pos = { ...target.pos };
-                        events.push({ event: 'move', pieceId: enemy.id, from, to: enemy.pos });
-                        events.push({ event: 'death', pieceId: target.id, killedBy: enemy.id });
-                        this.addLog(`${this.pieceName(enemy.type)} захватил ${target.name}!`);
+                        if (died) {
+                            enemy.pos = { ...target.pos };
+                            events.push({ event: 'move', pieceId: enemy.id, from, to: enemy.pos });
+                            events.push({ event: 'death', pieceId: target.id, killedBy: enemy.id });
+                            this.addLog(`${this.pieceName(enemy.type)} захватил ${target.name}!`);
+                        } else {
+                            // ExtraLife saved the player!
+                            this.addLog(`${this.pieceName(enemy.type)} атаковал ${target.name}, но вторая жизнь спасла!`);
+                        }
                     }
                     break;
                 }
@@ -591,16 +463,14 @@ export class GameRoom implements DurableObject {
         this.turnEvents.push(...events);
     }
 
-    /** Begin a new player phase */
     private startPlayerPhase(): void {
         if (!this.gameState) return;
         this.gameState.phase = 'players';
         this.gameState.playersActed = [];
         this.gameState.turnNumber++;
-        this.addLog(`━━━ Ход ${this.gameState.turnNumber}: Фаза союзников ━━━`);
+        this.addLog(`━━━ Ход ${this.gameState.turnNumber}: Ваш ход ━━━`);
     }
 
-    /** Broadcast phase change notification */
     private broadcastPhaseChange(): void {
         if (!this.gameState) return;
         const alivePlayers = this.gameState.players.filter(p => p.alive);
@@ -613,14 +483,31 @@ export class GameRoom implements DurableObject {
         });
     }
 
-    /** Broadcast current phase status (how many players have acted) */
     private broadcastPhaseStatus(): void {
         if (!this.gameState) return;
-        // Send updated views so everyone sees latest board + their canAct status
         for (const [ws, conn] of this.connections) {
             const view = this.buildClientView(conn.playerId);
             this.send(ws, { type: 'turn_result', view, events: [] });
         }
+    }
+
+    // ══════════════════════════════════════════════════
+    // UPGRADE SYSTEM
+    // ══════════════════════════════════════════════════
+
+    /** Pick 2 random upgrades the player doesn't have yet */
+    private getUpgradeOptions(player: PlayerPiece): Upgrade[] {
+        const available = ALL_UPGRADES.filter(u => !player.upgrades.includes(u));
+        if (available.length === 0) return [];
+        if (available.length <= 2) return [...available];
+
+        // Pick 2 random
+        const shuffled = [...available];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled.slice(0, 2);
     }
 
     // ══════════════════════════════════════════════════
@@ -633,7 +520,10 @@ export class GameRoom implements DurableObject {
 
         if (!player) return this.buildSpectatorView();
 
-        const viewRadius = VIEW_RADIUS[player.type] ?? 5;
+        const viewRadius = BASE_VIEW_RADIUS +
+            (player.upgrades.includes(Upgrade.BishopSlide) ? 1 : 0) +
+            (player.upgrades.includes(Upgrade.RookRush) ? 1 : 0);
+
         const visibleSet = computeFOV(player.pos, viewRadius, gs.map);
 
         const tiles: Tile[][] = [];
@@ -655,9 +545,6 @@ export class GameRoom implements DurableObject {
         const visibleEnemies = gs.enemies.filter(
             e => e.alive && visibleSet.has(`${e.pos.x},${e.pos.y}`)
         );
-        const visibleItems = gs.items.filter(
-            i => i.pos && visibleSet.has(`${i.pos.x},${i.pos.y}`)
-        );
 
         const alivePlayers = gs.players.filter(p => p.alive);
         const canAct = gs.phase === 'players' && player.alive && !gs.playersActed.includes(playerId);
@@ -670,7 +557,6 @@ export class GameRoom implements DurableObject {
             myPiece: player,
             visiblePlayers,
             visibleEnemies,
-            visibleItems,
             phase: gs.phase,
             turnNumber: gs.turnNumber,
             log: gs.log.slice(-15),
@@ -691,7 +577,6 @@ export class GameRoom implements DurableObject {
             myPiece: null as unknown as PlayerPiece,
             visiblePlayers: [],
             visibleEnemies: [],
-            visibleItems: [],
             phase: gs.phase,
             turnNumber: gs.turnNumber,
             log: gs.log.slice(-15),
@@ -740,11 +625,6 @@ export class GameRoom implements DurableObject {
         }
     }
 
-    private async loadState(): Promise<void> {
-        this.gameState = await this.state.storage.get('gameState') ?? null;
-        this.seed = await this.state.storage.get('seed') ?? 0;
-    }
-
     // ══════════════════════════════════════════════════
     // HELPERS
     // ══════════════════════════════════════════════════
@@ -762,15 +642,19 @@ export class GameRoom implements DurableObject {
         }
     }
 
-    private pieceSymbol(type: PieceType): string {
-        return ({ pawn: '♟', knight: '♞', bishop: '♝', rook: '♜', queen: '♛', king: '♚' })[type] ?? '?';
-    }
-
     private pieceName(type: PieceType): string {
         return ({ pawn: 'Пешка', knight: 'Конь', bishop: 'Слон', rook: 'Ладья', queen: 'Ферзь', king: 'Король' })[type] ?? type;
     }
 
-    private posStr(pos: Position): string {
-        return `${String.fromCharCode(65 + pos.x % 26)}${pos.y + 1}`;
+    private upgradeName(upgrade: Upgrade): string {
+        const names: Record<string, string> = {
+            diagonal_capture: '↗ Диагональный удар',
+            knight_leap: '♞ Прыжок коня',
+            bishop_slide: '♝ Скольжение слона',
+            rook_rush: '♜ Бросок ладьи',
+            extra_life: '❤ Вторая жизнь',
+            double_step: '⏩ Двойной шаг',
+        };
+        return names[upgrade] ?? upgrade;
     }
 }

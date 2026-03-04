@@ -1,37 +1,32 @@
 // ═══════════════════════════════════════════════════
 // Chess Roguelike — Chess Movement Rules
+// With upgrade-based movement for the player pawn
 // ═══════════════════════════════════════════════════
 
-import { PieceType, Position, TileType, DungeonMap } from './types.js';
+import { PieceType, Position, TileType, DungeonMap, Upgrade } from './types.js';
 
-/**
- * Offset-based moves (for Pawn, Knight, King).
- * Each entry is a [dx, dy] offset from current position.
- */
 export type MoveOffset = [number, number];
-
-/**
- * Direction-based moves (for Bishop, Rook, Queen).
- * The piece can move any number of tiles along these directions until blocked.
- */
 export type MoveDirection = [number, number];
 
-// ── Pawn Moves ────────────────────────────────────
-// Roguelike pawn: moves 1 in any cardinal direction, attacks diagonally
+// ── Standard Piece Offsets ────────────────────────
+
 const PAWN_MOVE_OFFSETS: MoveOffset[] = [
-    [0, -1], [0, 1], [-1, 0], [1, 0],   // move: 4 cardinal
-];
-const PAWN_ATTACK_OFFSETS: MoveOffset[] = [
-    [-1, -1], [1, -1], [-1, 1], [1, 1],  // attack: 4 diagonal
+    [0, -1], [0, 1], [-1, 0], [1, 0],   // 4 cardinal directions
 ];
 
-// ── Knight Moves ──────────────────────────────────
+const PAWN_DOUBLE_STEP_OFFSETS: MoveOffset[] = [
+    [0, -2], [0, 2], [-2, 0], [2, 0],   // 2 tiles cardinal
+];
+
+const DIAGONAL_OFFSETS: MoveOffset[] = [
+    [-1, -1], [1, -1], [-1, 1], [1, 1],
+];
+
 const KNIGHT_OFFSETS: MoveOffset[] = [
     [-2, -1], [-1, -2], [1, -2], [2, -1],
     [2, 1], [1, 2], [-1, 2], [-2, 1],
 ];
 
-// ── King Moves ────────────────────────────────────
 const KING_OFFSETS: MoveOffset[] = [
     [-1, -1], [0, -1], [1, -1],
     [-1, 0], [1, 0],
@@ -39,6 +34,7 @@ const KING_OFFSETS: MoveOffset[] = [
 ];
 
 // ── Sliding Directions ────────────────────────────
+
 const DIAGONAL_DIRS: MoveDirection[] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
 const STRAIGHT_DIRS: MoveDirection[] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
 const ALL_DIRS: MoveDirection[] = [...STRAIGHT_DIRS, ...DIAGONAL_DIRS];
@@ -55,14 +51,11 @@ function isWalkable(x: number, y: number, map: DungeonMap): boolean {
     return t === TileType.Floor || t === TileType.StairsDown || t === TileType.StairsUp || t === TileType.Door;
 }
 
-/**
- * Get all valid move positions for offset-based pieces (Pawn, Knight, King).
- */
 function getOffsetMoves(
     pos: Position,
     offsets: MoveOffset[],
     map: DungeonMap,
-    occupiedByFriendly: Set<string>, // "x,y" strings
+    occupiedByFriendly: Set<string>,
 ): Position[] {
     const result: Position[] = [];
     for (const [dx, dy] of offsets) {
@@ -75,12 +68,6 @@ function getOffsetMoves(
     return result;
 }
 
-/**
- * Get all valid move positions for sliding pieces (Bishop, Rook, Queen).
- * Slides along direction until hitting a wall or edge.
- * Can stop on enemy-occupied tile (capture), but not friendly.
- * Knight exception: can jump over walls!
- */
 function getSlidingMoves(
     pos: Position,
     directions: MoveDirection[],
@@ -108,8 +95,90 @@ function getSlidingMoves(
 // ── Public API ────────────────────────────────────
 
 /**
- * Get all valid positions a piece can move to.
- * Takes into account chess rules, dungeon walls, and occupied tiles.
+ * Get valid moves for the PLAYER (a pawn with upgrades).
+ * Base: 4 cardinal directions.
+ * Upgrades add more movement types.
+ */
+export function getPlayerMoves(
+    pos: Position,
+    map: DungeonMap,
+    friendlyPositions: Position[],
+    enemyPositions: Position[],
+    upgrades: Upgrade[],
+): Position[] {
+    const friendlySet = new Set(friendlyPositions.map(p => `${p.x},${p.y}`));
+    const enemySet = new Set(enemyPositions.map(p => `${p.x},${p.y}`));
+    const seen = new Set<string>();
+    const result: Position[] = [];
+
+    const addUnique = (positions: Position[]) => {
+        for (const p of positions) {
+            const key = `${p.x},${p.y}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                result.push(p);
+            }
+        }
+    };
+
+    // Base pawn moves: 4 cardinal directions
+    addUnique(getOffsetMoves(pos, PAWN_MOVE_OFFSETS, map, friendlySet));
+
+    // Upgrade: Diagonal Capture — can move diagonally ONLY if enemy is there
+    if (upgrades.includes(Upgrade.DiagonalCapture)) {
+        for (const [dx, dy] of DIAGONAL_OFFSETS) {
+            const nx = pos.x + dx;
+            const ny = pos.y + dy;
+            const key = `${nx},${ny}`;
+            if (isWalkable(nx, ny, map) && enemySet.has(key) && !seen.has(key)) {
+                seen.add(key);
+                result.push({ x: nx, y: ny });
+            }
+        }
+    }
+
+    // Upgrade: Knight Leap
+    if (upgrades.includes(Upgrade.KnightLeap)) {
+        addUnique(getOffsetMoves(pos, KNIGHT_OFFSETS, map, friendlySet));
+    }
+
+    // Upgrade: Bishop Slide
+    if (upgrades.includes(Upgrade.BishopSlide)) {
+        addUnique(getSlidingMoves(pos, DIAGONAL_DIRS, map, friendlySet, enemySet));
+    }
+
+    // Upgrade: Rook Rush
+    if (upgrades.includes(Upgrade.RookRush)) {
+        addUnique(getSlidingMoves(pos, STRAIGHT_DIRS, map, friendlySet, enemySet));
+    }
+
+    // Upgrade: Double Step — move 2 tiles cardinally (must have clear path)
+    if (upgrades.includes(Upgrade.DoubleStep)) {
+        for (const [dx, dy] of PAWN_DOUBLE_STEP_OFFSETS) {
+            const mx = pos.x + dx / 2; // midpoint
+            const my = pos.y + dy / 2;
+            const nx = pos.x + dx;
+            const ny = pos.y + dy;
+            const key = `${nx},${ny}`;
+            if (
+                isWalkable(mx, my, map) &&
+                isWalkable(nx, ny, map) &&
+                !friendlySet.has(`${mx},${my}`) &&
+                !friendlySet.has(key) &&
+                !seen.has(key)
+            ) {
+                seen.add(key);
+                result.push({ x: nx, y: ny });
+            }
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Get valid moves for standard chess pieces (enemies).
+ * Uses traditional chess movement rules.
  */
 export function getValidMoves(
     pieceType: PieceType,
@@ -123,10 +192,12 @@ export function getValidMoves(
 
     switch (pieceType) {
         case PieceType.Pawn:
-            return getOffsetMoves(pos, PAWN_MOVE_OFFSETS, map, friendlySet);
+            // Enemy pawns: move forward + diagonal capture
+            return [
+                ...getOffsetMoves(pos, PAWN_MOVE_OFFSETS, map, friendlySet),
+            ];
 
         case PieceType.Knight:
-            // Knight can jump over walls! Only check destination.
             return getOffsetMoves(pos, KNIGHT_OFFSETS, map, friendlySet);
 
         case PieceType.Bishop:
@@ -147,17 +218,25 @@ export function getValidMoves(
 }
 
 /**
- * Get all positions a piece can attack (may differ from move for Pawn).
+ * Get attack positions for a piece (for enemy AI).
  */
 export function getAttackPositions(
     pieceType: PieceType,
     pos: Position,
     map: DungeonMap,
 ): Position[] {
+    // Enemy pawns can attack on diagonal
     if (pieceType === PieceType.Pawn) {
-        // Pawn attacks diagonally
         const result: Position[] = [];
-        for (const [dx, dy] of PAWN_ATTACK_OFFSETS) {
+        for (const [dx, dy] of DIAGONAL_OFFSETS) {
+            const nx = pos.x + dx;
+            const ny = pos.y + dy;
+            if (isInBounds(nx, ny, map)) {
+                result.push({ x: nx, y: ny });
+            }
+        }
+        // Also can capture cardinally (same as move)
+        for (const [dx, dy] of PAWN_MOVE_OFFSETS) {
             const nx = pos.x + dx;
             const ny = pos.y + dy;
             if (isInBounds(nx, ny, map)) {
@@ -166,13 +245,26 @@ export function getAttackPositions(
         }
         return result;
     }
-    // All other pieces attack same squares they can move to
-    // For simplicity, return all reachable directions (without occupancy check)
     return getValidMoves(pieceType, pos, map, [], []);
 }
 
 /**
- * Check if a move from `from` to `to` is valid for given piece type.
+ * Check if a move is valid for the player (with upgrades).
+ */
+export function isValidPlayerMove(
+    pos: Position,
+    to: Position,
+    map: DungeonMap,
+    friendlyPositions: Position[],
+    enemyPositions: Position[],
+    upgrades: Upgrade[],
+): boolean {
+    const validMoves = getPlayerMoves(pos, map, friendlyPositions, enemyPositions, upgrades);
+    return validMoves.some(m => m.x === to.x && m.y === to.y);
+}
+
+/**
+ * Check if a move is valid for an enemy piece.
  */
 export function isValidMove(
     pieceType: PieceType,

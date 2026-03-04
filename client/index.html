@@ -36,7 +36,7 @@
         </button>
       </div>
       <div class="menu-footer">
-        <p>WASD/Стрелки — движение • E — подобрать • I — инвентарь • Space — пропустить ход</p>
+        <p>WASD/Стрелки — движение • Space — пропуск • Захватывай врагов — получай апгрейды!</p>
       </div>
     </div>
   </div>
@@ -49,16 +49,18 @@
         <div class="panel" id="panel-player">
           <h3 id="player-info-name">♟ Пешка</h3>
           <div class="stat-row">
-            <span>⭐ XP: <strong id="xp-text">0/10</strong></span>
+            <span>⚔️ Захватов: <strong id="captures-text">0</strong></span>
             <span>🏰 Этаж: <strong id="floor-text">1</strong></span>
           </div>
           <div class="stat-row">
-            <span>⚔️ Захватов: <strong id="captures-text">0</strong></span>
+            <span>⬆️ След. апгрейд: <strong id="next-upgrade-text">через 3</strong></span>
           </div>
         </div>
-        <div class="panel" id="panel-inventory">
-          <h3>🎒 Инвентарь</h3>
-          <div id="inventory-list" class="inventory-grid"></div>
+        <div class="panel" id="panel-upgrades">
+          <h3>🔧 Апгрейды</h3>
+          <div id="upgrades-list" class="upgrades-list">
+            <div class="upgrades-empty">Нет апгрейдов</div>
+          </div>
         </div>
         <div class="panel" id="panel-turn">
           <div id="turn-indicator" class="turn-indicator">Ваш ход!</div>
@@ -89,12 +91,12 @@
     </div>
   </div>
 
-  <!-- ═══ Promotion Modal ═══ -->
-  <div id="promotion-modal" class="modal hidden">
+  <!-- ═══ Upgrade Modal ═══ -->
+  <div id="upgrade-modal" class="modal hidden">
     <div class="modal-content">
-      <h2>👑 Повышение!</h2>
-      <p>Выберите новую фигуру:</p>
-      <div id="promotion-options" class="promotion-grid"></div>
+      <h2>⬆️ Выберите апгрейд!</h2>
+      <p>Вы заслужили улучшение. Выберите одно:</p>
+      <div id="upgrade-options" class="upgrade-grid"></div>
     </div>
   </div>
 

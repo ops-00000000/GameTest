@@ -2,7 +2,7 @@
 // Chess Roguelike — WebSocket Protocol
 // ═══════════════════════════════════════════════════
 
-import { PieceType, Position, ClientView, Item, TurnPhase } from './types.js';
+import { PieceType, Position, ClientView, TurnPhase, Upgrade } from './types.js';
 
 // ── Client → Server Messages ──────────────────────
 
@@ -16,27 +16,13 @@ export interface MoveMessage {
     to: Position;
 }
 
-export interface AttackMessage {
-    type: 'attack';
-    targetId: string;
-}
-
-export interface UseItemMessage {
-    type: 'use_item';
-    itemId: string;
-}
-
-export interface PickupItemMessage {
-    type: 'pickup';
-}
-
-export interface PromoteMessage {
-    type: 'promote';
-    pieceType: PieceType;
+export interface ChooseUpgradeMessage {
+    type: 'choose_upgrade';
+    upgrade: Upgrade;
 }
 
 export interface DescendMessage {
-    type: 'descend'; // go down stairs
+    type: 'descend';
 }
 
 export interface ChatMessage {
@@ -51,10 +37,7 @@ export interface SkipTurnMessage {
 export type ClientMessage =
     | JoinRoomMessage
     | MoveMessage
-    | AttackMessage
-    | UseItemMessage
-    | PickupItemMessage
-    | PromoteMessage
+    | ChooseUpgradeMessage
     | DescendMessage
     | ChatMessage
     | SkipTurnMessage;
@@ -99,9 +82,9 @@ export interface ErrorMessage {
     message: string;
 }
 
-export interface PromotionAvailableMessage {
-    type: 'promotion_available';
-    options: PieceType[];
+export interface UpgradeAvailableMessage {
+    type: 'upgrade_available';
+    options: Upgrade[]; // 2 random upgrades to choose from
 }
 
 export interface PhaseChangeMessage {
@@ -119,7 +102,7 @@ export type ServerMessage =
     | PlayerLeftMessage
     | ChatBroadcastMessage
     | ErrorMessage
-    | PromotionAvailableMessage
+    | UpgradeAvailableMessage
     | PhaseChangeMessage;
 
 // ── Game Events (included in TurnResult) ──────────
@@ -131,31 +114,16 @@ export interface MoveEvent {
     to: Position;
 }
 
-export interface AttackEvent {
-    event: 'attack';
-    attackerId: string;
-    targetId: string;
-    damage: number;
-    targetHp: number;
-}
-
 export interface DeathEvent {
     event: 'death';
     pieceId: string;
     killedBy: string;
 }
 
-export interface PickupEvent {
-    event: 'pickup';
+export interface UpgradeEvent {
+    event: 'upgrade';
     playerId: string;
-    item: Item;
-}
-
-export interface PromoteEvent {
-    event: 'promote';
-    playerId: string;
-    from: PieceType;
-    to: PieceType;
+    upgrade: Upgrade;
 }
 
 export interface DescendEvent {
@@ -165,8 +133,6 @@ export interface DescendEvent {
 
 export type GameEvent =
     | MoveEvent
-    | AttackEvent
     | DeathEvent
-    | PickupEvent
-    | PromoteEvent
+    | UpgradeEvent
     | DescendEvent;

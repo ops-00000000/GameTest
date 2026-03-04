@@ -2,6 +2,8 @@
 // Chess Roguelike — Game Constants
 // ═══════════════════════════════════════════════════
 
+import { Upgrade } from './types.js';
+
 /** Default dungeon dimensions (in tiles) */
 export const MAP_WIDTH = 48;
 export const MAP_HEIGHT = 32;
@@ -12,15 +14,8 @@ export const TILE_SIZE = 24;
 /** Max players per room */
 export const MAX_PLAYERS = 4;
 
-/** Fog of War — view radius per piece type */
-export const VIEW_RADIUS: Record<string, number> = {
-    pawn: 4,
-    knight: 5,
-    bishop: 6,
-    rook: 6,
-    queen: 7,
-    king: 5,
-};
+/** Fog of War — view radius (increases with upgrades) */
+export const BASE_VIEW_RADIUS = 5;
 
 /** Turn timeout in ms (30 seconds) */
 export const TURN_TIMEOUT_MS = 30_000;
@@ -38,21 +33,45 @@ export const DUNGEON = {
 /** Enemy count scaling per floor */
 export const ENEMIES_PER_FLOOR = (floor: number) => 3 + Math.floor(floor * 1.5);
 
-/** Loot chance per room (0..1) */
-export const LOOT_CHANCE = 0.4;
+/** Captures needed per upgrade */
+export const CAPTURES_PER_UPGRADE = 3;
 
-/** Base stats per piece type */
-export const BASE_STATS: Record<string, { hp: number; attack: number; defense: number }> = {
-    pawn: { hp: 10, attack: 3, defense: 1 },
-    knight: { hp: 15, attack: 5, defense: 2 },
-    bishop: { hp: 12, attack: 6, defense: 1 },
-    rook: { hp: 20, attack: 4, defense: 4 },
-    queen: { hp: 18, attack: 7, defense: 3 },
-    king: { hp: 30, attack: 8, defense: 5 },
+/** Upgrade info — display data for UI */
+export const UPGRADE_INFO: Record<Upgrade, { name: string; icon: string; desc: string }> = {
+    [Upgrade.DiagonalCapture]: {
+        name: 'Диагональный удар',
+        icon: '↗',
+        desc: 'Захват врагов по диагонали',
+    },
+    [Upgrade.KnightLeap]: {
+        name: 'Прыжок коня',
+        icon: '♞',
+        desc: 'Ход буквой Г (как конь)',
+    },
+    [Upgrade.BishopSlide]: {
+        name: 'Скольжение слона',
+        icon: '♝',
+        desc: 'Движение по диагоналям',
+    },
+    [Upgrade.RookRush]: {
+        name: 'Бросок ладьи',
+        icon: '♜',
+        desc: 'Движение по прямым линиям',
+    },
+    [Upgrade.ExtraLife]: {
+        name: 'Вторая жизнь',
+        icon: '❤',
+        desc: 'Выживание после одного захвата',
+    },
+    [Upgrade.DoubleStep]: {
+        name: 'Двойной шаг',
+        icon: '⏩',
+        desc: 'Ход на 2 клетки кардинально',
+    },
 };
 
-/** XP required for promotion */
-export const PROMOTION_XP = 10;
+/** All available upgrades */
+export const ALL_UPGRADES: Upgrade[] = Object.values(Upgrade);
 
 /** WebSocket close codes */
 export const WS_CLOSE = {

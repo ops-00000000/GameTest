@@ -3,8 +3,8 @@
 // BSP (Binary Space Partition) algorithm
 // ═══════════════════════════════════════════════════
 
-import { DungeonMap, TileType, Room, Position, PieceType, EnemyPiece, Item, ItemType } from '@chess-roguelike/shared';
-import { MAP_WIDTH, MAP_HEIGHT, DUNGEON, ENEMIES_PER_FLOOR, LOOT_CHANCE, BASE_STATS } from '@chess-roguelike/shared';
+import { DungeonMap, TileType, Room, Position, PieceType, EnemyPiece } from '@chess-roguelike/shared';
+import { MAP_WIDTH, MAP_HEIGHT, DUNGEON, ENEMIES_PER_FLOOR } from '@chess-roguelike/shared';
 import { SeededRNG } from '../utils/seeded-rng.js';
 
 // ── BSP Leaf Node ─────────────────────────────────
@@ -22,12 +22,11 @@ interface BSPLeaf {
 function splitLeaf(leaf: BSPLeaf, rng: SeededRNG): boolean {
     if (leaf.left || leaf.right) return false;
 
-    // Determine split direction
     let splitH: boolean;
     if (leaf.w / leaf.h >= 1.25) {
-        splitH = false; // too wide, split vertically
+        splitH = false;
     } else if (leaf.h / leaf.w >= 1.25) {
-        splitH = true;  // too tall, split horizontally
+        splitH = true;
     } else {
         splitH = rng.next() > 0.5;
     }
@@ -76,7 +75,6 @@ function getRoom(leaf: BSPLeaf): Room | undefined {
 }
 
 function connectRooms(tiles: TileType[][], r1: Room, r2: Room, rng: SeededRNG): void {
-    // Center points of each room
     const p1: Position = {
         x: Math.floor(r1.x + r1.w / 2),
         y: Math.floor(r1.y + r1.h / 2),
@@ -86,7 +84,6 @@ function connectRooms(tiles: TileType[][], r1: Room, r2: Room, rng: SeededRNG): 
         y: Math.floor(r2.y + r2.h / 2),
     };
 
-    // L-shaped corridor
     if (rng.next() > 0.5) {
         carveHCorridor(tiles, p1.x, p2.x, p1.y);
         carveVCorridor(tiles, p1.y, p2.y, p2.x);
@@ -146,13 +143,11 @@ export function generateDungeon(floor: number, seed: number): DungeonMap {
     const width = MAP_WIDTH;
     const height = MAP_HEIGHT;
 
-    // Initialize all walls
     const tiles: TileType[][] = [];
     for (let y = 0; y < height; y++) {
         tiles[y] = new Array(width).fill(TileType.Wall);
     }
 
-    // BSP split
     const root: BSPLeaf = { x: 0, y: 0, w: width, h: height };
     const leaves: BSPLeaf[] = [root];
     let didSplit = true;
@@ -171,10 +166,8 @@ export function generateDungeon(floor: number, seed: number): DungeonMap {
         }
     }
 
-    // Create rooms in leaves
     createRoom(root, rng);
 
-    // Carve rooms into tiles
     const rooms = collectRooms(root);
     for (const room of rooms) {
         for (let y = room.y; y < room.y + room.h; y++) {
@@ -186,20 +179,16 @@ export function generateDungeon(floor: number, seed: number): DungeonMap {
         }
     }
 
-    // Connect rooms
     createConnections(root, tiles, rng);
 
-    // Place stairs
     if (rooms.length >= 2) {
         const firstRoom = rooms[0];
         const lastRoom = rooms[rooms.length - 1];
 
-        // Stairs up in first room
         const upX = Math.floor(firstRoom.x + firstRoom.w / 2);
         const upY = Math.floor(firstRoom.y + firstRoom.h / 2);
         tiles[upY][upX] = TileType.StairsUp;
 
-        // Stairs down in last room
         const downX = Math.floor(lastRoom.x + lastRoom.w / 2);
         const downY = Math.floor(lastRoom.y + lastRoom.h / 2);
         tiles[downY][downX] = TileType.StairsDown;
@@ -208,7 +197,6 @@ export function generateDungeon(floor: number, seed: number): DungeonMap {
     return { width, height, tiles, rooms, floor };
 }
 
-/** Get a random floor position inside a specific room */
 export function getRandomRoomPosition(room: Room, rng: SeededRNG): Position {
     return {
         x: rng.int(room.x + 1, room.x + room.w - 2),
@@ -216,7 +204,6 @@ export function getRandomRoomPosition(room: Room, rng: SeededRNG): Position {
     };
 }
 
-/** Get spawn position for a new player (first room, near stairs up) */
 export function getSpawnPosition(map: DungeonMap): Position {
     const firstRoom = map.rooms[0];
     return {
@@ -225,7 +212,7 @@ export function getSpawnPosition(map: DungeonMap): Position {
     };
 }
 
-/** Generate enemies for a floor */
+/** Generate enemies — standard chess pieces, no stats */
 export function generateEnemies(map: DungeonMap, floor: number, seed: number): EnemyPiece[] {
     const rng = new SeededRNG(seed + floor * 2000 + 777);
     const count = ENEMIES_PER_FLOOR(floor);
@@ -238,28 +225,18 @@ export function generateEnemies(map: DungeonMap, floor: number, seed: number): E
     if (floor >= 4) availableTypes.push(PieceType.Rook);
     if (floor >= 6) availableTypes.push(PieceType.Queen);
 
-    // Place enemies in rooms (skip first room — spawn point)
     const eligibleRooms = map.rooms.slice(1);
     if (eligibleRooms.length === 0) return enemies;
 
     for (let i = 0; i < count; i++) {
         const room = rng.pick(eligibleRooms);
         const type = rng.pick(availableTypes);
-        const base = BASE_STATS[type];
-        const floorMult = 1 + floor * 0.15;
 
         enemies.push({
             id: `enemy-${floor}-${i}`,
             type,
             color: 'black',
             pos: getRandomRoomPosition(room, rng),
-            stats: {
-                hp: Math.floor(base.hp * floorMult),
-                maxHp: Math.floor(base.hp * floorMult),
-                attack: Math.floor(base.attack * floorMult),
-                defense: Math.floor(base.defense * floorMult),
-                xp: 0,
-            },
             floor,
             alive: true,
         });
@@ -268,9 +245,6 @@ export function generateEnemies(map: DungeonMap, floor: number, seed: number): E
     // Boss on every 5th floor — a King
     if (floor % 5 === 0 && floor > 0) {
         const bossRoom = eligibleRooms[eligibleRooms.length - 1];
-        const base = BASE_STATS[PieceType.King];
-        const floorMult = 1 + floor * 0.2;
-
         enemies.push({
             id: `boss-${floor}`,
             type: PieceType.King,
@@ -279,72 +253,10 @@ export function generateEnemies(map: DungeonMap, floor: number, seed: number): E
                 x: Math.floor(bossRoom.x + bossRoom.w / 2),
                 y: Math.floor(bossRoom.y + bossRoom.h / 2),
             },
-            stats: {
-                hp: Math.floor(base.hp * floorMult),
-                maxHp: Math.floor(base.hp * floorMult),
-                attack: Math.floor(base.attack * floorMult),
-                defense: Math.floor(base.defense * floorMult),
-                xp: 0,
-            },
             floor,
             alive: true,
         });
     }
 
     return enemies;
-}
-
-/** Generate loot items for rooms */
-export function generateItems(map: DungeonMap, floor: number, seed: number): Item[] {
-    const rng = new SeededRNG(seed + floor * 3000 + 999);
-    const items: Item[] = [];
-    let itemCounter = 0;
-
-    for (let i = 1; i < map.rooms.length; i++) {
-        if (rng.next() > LOOT_CHANCE) continue;
-
-        const room = map.rooms[i];
-        const pos = getRandomRoomPosition(room, rng);
-
-        const roll = rng.next();
-        let item: Item;
-
-        if (roll < 0.4) {
-            item = {
-                id: `item-${floor}-${itemCounter++}`,
-                type: ItemType.HealthPotion,
-                name: '❤️ Health Potion',
-                value: 5 + floor * 2,
-                pos,
-            };
-        } else if (roll < 0.65) {
-            item = {
-                id: `item-${floor}-${itemCounter++}`,
-                type: ItemType.AttackBoost,
-                name: '⚔️ Attack Boost',
-                value: 1 + Math.floor(floor / 3),
-                pos,
-            };
-        } else if (roll < 0.85) {
-            item = {
-                id: `item-${floor}-${itemCounter++}`,
-                type: ItemType.DefenseBoost,
-                name: '🛡️ Defense Boost',
-                value: 1 + Math.floor(floor / 3),
-                pos,
-            };
-        } else {
-            item = {
-                id: `item-${floor}-${itemCounter++}`,
-                type: ItemType.PromotionToken,
-                name: '👑 Promotion Token',
-                value: 1,
-                pos,
-            };
-        }
-
-        items.push(item);
-    }
-
-    return items;
 }

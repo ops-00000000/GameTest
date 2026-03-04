@@ -2,7 +2,7 @@
 // Chess Roguelike — Client Game State
 // ═══════════════════════════════════════════════════
 
-import { ClientView, Position, PieceType, TurnPhase } from '@chess-roguelike/shared';
+import { ClientView, Position, PieceType } from '@chess-roguelike/shared';
 
 export class GameClientState {
     view: ClientView | null = null;
@@ -10,8 +10,6 @@ export class GameClientState {
     roomId: string = '';
     playerName: string = '';
     validMoves: Position[] = [];
-    selectedTarget: Position | null = null;
-    showInventory: boolean = false;
 
     updateView(view: ClientView): void {
         this.view = view;

@@ -21,8 +21,8 @@ export enum TileType {
 
 export interface Tile {
     type: TileType;
-    explored: boolean; // has this player ever seen this tile
-    visible: boolean;  // is currently visible by this player
+    explored: boolean;
+    visible: boolean;
 }
 
 // ── Chess Pieces ──────────────────────────────────
@@ -38,54 +38,42 @@ export enum PieceType {
 
 export type PieceColor = 'white' | 'black';
 
-export interface Stats {
-    hp: number;
-    maxHp: number;
-    attack: number;
-    defense: number;
-    xp: number;
+// ── Upgrades (Roguelike perk system) ──────────────
+
+export enum Upgrade {
+    DiagonalCapture = 'diagonal_capture',   // capture diagonally
+    KnightLeap = 'knight_leap',         // move like a knight
+    BishopSlide = 'bishop_slide',        // move diagonally (sliding)
+    RookRush = 'rook_rush',           // move in straight lines (sliding)
+    ExtraLife = 'extra_life',          // survive one capture
+    DoubleStep = 'double_step',         // move 2 tiles cardinally
 }
+
+// ── Player & Enemy Pieces ─────────────────────────
 
 export interface PlayerPiece {
     id: string;
     name: string;
-    type: PieceType;
+    type: PieceType;     // always Pawn, but kept for rendering compatibility
     color: 'white';
     pos: Position;
-    stats: Stats;
-    inventory: Item[];
+    captures: number;    // total enemies captured
+    upgrades: Upgrade[]; // acquired upgrades
+    hasExtraLife: boolean; // whether extra life is currently active
     floor: number;
     alive: boolean;
 }
 
 export interface EnemyPiece {
     id: string;
-    type: PieceType;
+    type: PieceType;     // standard chess piece type
     color: 'black';
     pos: Position;
-    stats: Stats;
     floor: number;
     alive: boolean;
 }
 
 export type GamePiece = PlayerPiece | EnemyPiece;
-
-// ── Items / Loot ──────────────────────────────────
-
-export enum ItemType {
-    HealthPotion = 'health_potion',
-    AttackBoost = 'attack_boost',
-    DefenseBoost = 'defense_boost',
-    PromotionToken = 'promotion_token',
-}
-
-export interface Item {
-    id: string;
-    type: ItemType;
-    name: string;
-    value: number; // effect magnitude
-    pos?: Position; // if on the ground
-}
 
 // ── Dungeon Map ───────────────────────────────────
 
@@ -116,11 +104,10 @@ export interface GameState {
     map: DungeonMap;
     players: PlayerPiece[];
     enemies: EnemyPiece[];
-    items: Item[];
-    phase: TurnPhase;       // current turn phase
-    playersActed: string[]; // IDs of players who already acted this turn
+    phase: TurnPhase;
+    playersActed: string[];
     turnNumber: number;
-    log: string[];          // last N game log messages
+    log: string[];
 }
 
 // ── Client View (fog-of-war filtered) ─────────────
@@ -129,15 +116,14 @@ export interface ClientView {
     floor: number;
     mapWidth: number;
     mapHeight: number;
-    tiles: Tile[][];           // fog-filtered [y][x]
+    tiles: Tile[][];
     myPiece: PlayerPiece;
     visiblePlayers: PlayerPiece[];
     visibleEnemies: EnemyPiece[];
-    visibleItems: Item[];
     phase: TurnPhase;
     turnNumber: number;
     log: string[];
-    canAct: boolean;           // can this player submit an action right now
-    playersReady: number;      // how many players have acted this turn
-    playersTotal: number;      // total alive players
+    canAct: boolean;
+    playersReady: number;
+    playersTotal: number;
 }
