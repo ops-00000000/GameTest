@@ -1,24 +1,20 @@
 // ═══════════════════════════════════════════════════
-// Chess Roguelike — Combat System
+// Chess Roguelike — Combat System (Chess Capture)
 // ═══════════════════════════════════════════════════
+// Original chess rules: capture = instant death.
+// Move to enemy square → enemy is removed.
+// Enemy moves to player square → player is removed.
 
-import { PlayerPiece, EnemyPiece, Stats, PieceType } from '@chess-roguelike/shared';
+import { PlayerPiece, EnemyPiece, PieceType } from '@chess-roguelike/shared';
 import { PROMOTION_XP } from '@chess-roguelike/shared';
 
-export interface CombatResult {
-    damage: number;
-    targetHp: number;
-    killed: boolean;
+export interface CaptureResult {
+    captured: true;
     xpGained: number;
     canPromote: boolean;
 }
 
-/** Calculate damage: attacker.attack - defender.defense (min 1) */
-function calcDamage(attacker: Stats, defender: Stats): number {
-    return Math.max(1, attacker.attack - defender.defense);
-}
-
-/** XP reward for killing an enemy */
+/** XP reward for capturing an enemy piece */
 function xpReward(enemyType: PieceType): number {
     const rewards: Record<string, number> = {
         pawn: 1,
@@ -31,64 +27,24 @@ function xpReward(enemyType: PieceType): number {
     return rewards[enemyType] ?? 1;
 }
 
-/** Player attacks an enemy */
-export function playerAttackEnemy(player: PlayerPiece, enemy: EnemyPiece): CombatResult {
-    const damage = calcDamage(player.stats, enemy.stats);
-    enemy.stats.hp -= damage;
+/** Player captures an enemy — chess style: instant removal */
+export function playerCaptureEnemy(player: PlayerPiece, enemy: EnemyPiece): CaptureResult {
+    enemy.alive = false;
+    const xpGained = xpReward(enemy.type);
+    player.stats.xp += xpGained;
+    const canPromote = player.stats.xp >= PROMOTION_XP && player.type !== PieceType.Queen;
 
-    const killed = enemy.stats.hp <= 0;
-    let xpGained = 0;
-    let canPromote = false;
-
-    if (killed) {
-        enemy.alive = false;
-        xpGained = xpReward(enemy.type);
-        player.stats.xp += xpGained;
-        canPromote = player.stats.xp >= PROMOTION_XP && player.type !== PieceType.Queen;
-    }
-
-    return {
-        damage,
-        targetHp: Math.max(0, enemy.stats.hp),
-        killed,
-        xpGained,
-        canPromote,
-    };
+    return { captured: true, xpGained, canPromote };
 }
 
-/** Enemy attacks a player */
-export function enemyAttackPlayer(enemy: EnemyPiece, player: PlayerPiece): CombatResult {
-    const damage = calcDamage(enemy.stats, player.stats);
-    player.stats.hp -= damage;
-
-    const killed = player.stats.hp <= 0;
-    if (killed) {
-        player.alive = false;
-    }
-
-    return {
-        damage,
-        targetHp: Math.max(0, player.stats.hp),
-        killed,
-        xpGained: 0,
-        canPromote: false,
-    };
+/** Enemy captures a player — chess style: instant death */
+export function enemyCapturePlayer(_enemy: EnemyPiece, player: PlayerPiece): void {
+    player.alive = false;
 }
 
 /** Apply promotion — change player's piece type and reset XP */
 export function promotePlayer(player: PlayerPiece, newType: PieceType): void {
-    const { hp: baseHp, attack, defense } = {
-        knight: { hp: 15, attack: 5, defense: 2 },
-        bishop: { hp: 12, attack: 6, defense: 1 },
-        rook: { hp: 20, attack: 4, defense: 4 },
-        queen: { hp: 18, attack: 7, defense: 3 },
-    }[newType] ?? { hp: 10, attack: 3, defense: 1 };
-
     player.type = newType;
-    player.stats.maxHp = baseHp;
-    player.stats.hp = baseHp; // full heal on promotion
-    player.stats.attack = attack;
-    player.stats.defense = defense;
     player.stats.xp = 0;
 }
 

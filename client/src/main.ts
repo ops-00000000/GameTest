@@ -21,19 +21,15 @@ const $gameScreen = document.getElementById('game-screen')!;
 const $btnJoin = document.getElementById('btn-join')!;
 const $playerName = document.getElementById('player-name') as HTMLInputElement;
 const $roomId = document.getElementById('room-id') as HTMLInputElement;
-const $serverUrl = document.getElementById('server-url') as HTMLInputElement;
 const $canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const $connectionStatus = document.getElementById('connection-status')!;
 const $connectionText = document.getElementById('connection-text')!;
 
 // HUD
 const $playerInfoName = document.getElementById('player-info-name')!;
-const $hpBar = document.getElementById('hp-bar')!;
-const $hpText = document.getElementById('hp-text')!;
-const $atkText = document.getElementById('atk-text')!;
-const $defText = document.getElementById('def-text')!;
 const $xpText = document.getElementById('xp-text')!;
 const $floorText = document.getElementById('floor-text')!;
+const $capturesText = document.getElementById('captures-text')!;
 const $inventoryList = document.getElementById('inventory-list')!;
 const $turnIndicator = document.getElementById('turn-indicator')!;
 const $turnNumber = document.getElementById('turn-number')!;
@@ -150,7 +146,13 @@ function joinGame(): void {
     }
 
     const roomId = $roomId.value.trim() || `room-${Date.now().toString(36)}`;
-    const serverUrl = $serverUrl.value.trim();
+
+    // Auto-detect server URL: same host in production, localhost in dev
+    const isLocalDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const serverUrl = isLocalDev
+        ? 'ws://localhost:8787'
+        : `${wsProto}://${location.host}`;
 
     state.playerName = name;
     state.roomId = roomId;
@@ -214,12 +216,7 @@ function handleServerMessage(msg: ServerMessage): void {
             addChatMessage('⚠️', msg.message);
             break;
         }
-        case 'waiting': {
-            // Update turn indicator
-            $turnIndicator.textContent = `Ход: ${msg.currentTurnPlayerName}`;
-            $turnIndicator.classList.add('waiting');
-            break;
-        }
+
         case 'phase_change': {
             // Update turn phase indicator
             if (msg.phase === 'enemies') {
@@ -295,14 +292,9 @@ function updateHUD(): void {
 
     $playerInfoName.textContent = `${state.pieceSymbol(me.type)} ${state.pieceName(me.type)} — ${me.name}`;
 
-    const hpRatio = Math.max(0, me.stats.hp / me.stats.maxHp) * 100;
-    $hpBar.style.width = `${hpRatio}%`;
-    $hpText.textContent = `${me.stats.hp}/${me.stats.maxHp}`;
-
-    $atkText.textContent = String(me.stats.attack);
-    $defText.textContent = String(me.stats.defense);
     $xpText.textContent = `${me.stats.xp}/${PROMOTION_XP}`;
     $floorText.textContent = String(state.view.floor);
+    $capturesText.textContent = String(me.stats.xp); // XP = captures in chess mode
 
     // Turn / Phase indicator
     const view = state.view;

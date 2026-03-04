@@ -14,7 +14,7 @@ import {
 } from '@chess-roguelike/shared';
 import { isValidMove, getAttackPositions } from '@chess-roguelike/shared';
 import { generateDungeon, generateEnemies, generateItems, getSpawnPosition } from '../game/world.js';
-import { playerAttackEnemy, enemyAttackPlayer, promotePlayer, getPromotionOptions } from '../game/combat.js';
+import { playerCaptureEnemy, enemyCapturePlayer, promotePlayer, getPromotionOptions } from '../game/combat.js';
 import { computeFOV } from '../game/fov.js';
 import { getEnemyAction } from '../game/ai.js';
 
@@ -265,21 +265,15 @@ export class GameRoom implements DurableObject {
 
         const events: GameEvent[] = [];
 
-        // Check if capture (enemy at destination)
+        // Check if capture (enemy at destination) — chess style: instant removal
         const targetEnemy = this.gameState.enemies.find(e => e.alive && e.pos.x === to.x && e.pos.y === to.y);
         if (targetEnemy) {
-            const result = playerAttackEnemy(player, targetEnemy);
-            events.push({
-                event: 'attack', attackerId: player.id, targetId: targetEnemy.id,
-                damage: result.damage, targetHp: result.targetHp,
-            });
-            if (result.killed) {
-                events.push({ event: 'death', pieceId: targetEnemy.id, killedBy: player.id });
-                this.addLog(`⚔️ ${player.name} захватил ${this.pieceName(targetEnemy.type)}! (+${result.xpGained} XP)`);
-                if (result.canPromote) {
-                    this.send(ws, { type: 'promotion_available', options: getPromotionOptions(player.type) });
-                    this.addLog(`👑 ${player.name} может повыситься!`);
-                }
+            const result = playerCaptureEnemy(player, targetEnemy);
+            events.push({ event: 'death', pieceId: targetEnemy.id, killedBy: player.id });
+            this.addLog(`⚔️ ${player.name} захватил ${this.pieceName(targetEnemy.type)}! (+${result.xpGained} XP)`);
+            if (result.canPromote) {
+                this.send(ws, { type: 'promotion_available', options: getPromotionOptions(player.type) });
+                this.addLog(`👑 ${player.name} может повыситься!`);
             }
         }
 
@@ -327,19 +321,18 @@ export class GameRoom implements DurableObject {
             return;
         }
 
-        const result = playerAttackEnemy(player, target);
-        const events: GameEvent[] = [{
-            event: 'attack', attackerId: player.id, targetId: target.id,
-            damage: result.damage, targetHp: result.targetHp,
-        }];
-        this.addLog(`⚔️ ${player.name} атакует ${this.pieceName(target.type)}: ${result.damage} урона`);
+        // Chess-style capture: instant kill, move to target square
+        const result = playerCaptureEnemy(player, target);
+        const events: GameEvent[] = [{ event: 'death', pieceId: target.id, killedBy: player.id }];
+        this.addLog(`⚔️ ${player.name} захватил ${this.pieceName(target.type)}! (+${result.xpGained} XP)`);
 
-        if (result.killed) {
-            events.push({ event: 'death', pieceId: target.id, killedBy: player.id });
-            this.addLog(`💀 ${this.pieceName(target.type)} повержен! (+${result.xpGained} XP)`);
-            if (result.canPromote) {
-                this.send(ws, { type: 'promotion_available', options: getPromotionOptions(player.type) });
-            }
+        // Move player to captured square
+        const from = { ...player.pos };
+        player.pos = { ...target.pos };
+        events.push({ event: 'move', pieceId: player.id, from, to: target.pos });
+
+        if (result.canPromote) {
+            this.send(ws, { type: 'promotion_available', options: getPromotionOptions(player.type) });
         }
 
         this.markPlayerActed(conn.playerId);
@@ -580,18 +573,15 @@ export class GameRoom implements DurableObject {
                     break;
                 }
                 case 'attack': {
+                    // Chess-style capture: enemy moves to player's square, player dies
                     const target = this.gameState.players.find(p => p.id === action.targetId);
                     if (target && target.alive) {
-                        const result = enemyAttackPlayer(enemy, target);
-                        events.push({
-                            event: 'attack', attackerId: enemy.id, targetId: target.id,
-                            damage: result.damage, targetHp: result.targetHp,
-                        });
-                        this.addLog(`${this.pieceName(enemy.type)} атакует ${target.name}: ${result.damage} урона`);
-                        if (result.killed) {
-                            events.push({ event: 'death', pieceId: target.id, killedBy: enemy.id });
-                            this.addLog(`💀 ${target.name} пал в бою!`);
-                        }
+                        const from = { ...enemy.pos };
+                        enemyCapturePlayer(enemy, target);
+                        enemy.pos = { ...target.pos };
+                        events.push({ event: 'move', pieceId: enemy.id, from, to: enemy.pos });
+                        events.push({ event: 'death', pieceId: target.id, killedBy: enemy.id });
+                        this.addLog(`${this.pieceName(enemy.type)} захватил ${target.name}!`);
                     }
                     break;
                 }

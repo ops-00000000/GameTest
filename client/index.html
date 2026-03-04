@@ -1,21 +1,25 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>♟ Chess Roguelike — Шахматное Подземелье</title>
   <meta name="description" content="Пошаговый рогалик с шахматными механиками и онлайн-мультиплеером" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
   <link rel="stylesheet" href="/src/style.css" />
 </head>
+
 <body>
   <!-- ═══ Menu Screen ═══ -->
   <div id="menu-screen" class="screen active">
     <div class="menu-container">
       <div class="menu-logo">
         <div class="logo-pieces">♚♛♜♝♞♟</div>
-        <h1>CHESS<br/>ROGUELIKE</h1>
+        <h1>CHESS<br />ROGUELIKE</h1>
         <p class="subtitle">Шахматное Подземелье</p>
       </div>
       <div class="menu-form">
@@ -26,10 +30,6 @@
         <div class="input-group">
           <label for="room-id">ID комнаты</label>
           <input type="text" id="room-id" placeholder="Оставьте пустым для новой..." maxlength="30" />
-        </div>
-        <div class="input-group">
-          <label for="server-url">Сервер</label>
-          <input type="text" id="server-url" value="ws://localhost:8787" placeholder="ws://..." />
         </div>
         <button id="btn-join" class="btn-primary">
           <span class="btn-icon">⚔️</span> Вступить в бой
@@ -48,20 +48,12 @@
       <div id="sidebar-left">
         <div class="panel" id="panel-player">
           <h3 id="player-info-name">♟ Пешка</h3>
-          <div class="stat-bar">
-            <div class="stat-label">HP</div>
-            <div class="stat-bar-track">
-              <div class="stat-bar-fill hp-fill" id="hp-bar" style="width:100%"></div>
-            </div>
-            <div class="stat-value" id="hp-text">10/10</div>
-          </div>
-          <div class="stat-row">
-            <span>⚔️ ATK: <strong id="atk-text">3</strong></span>
-            <span>🛡️ DEF: <strong id="def-text">1</strong></span>
-          </div>
           <div class="stat-row">
             <span>⭐ XP: <strong id="xp-text">0/10</strong></span>
             <span>🏰 Этаж: <strong id="floor-text">1</strong></span>
+          </div>
+          <div class="stat-row">
+            <span>⚔️ Захватов: <strong id="captures-text">0</strong></span>
           </div>
         </div>
         <div class="panel" id="panel-inventory">
@@ -113,4 +105,5 @@
 
   <script type="module" src="/src/main.ts"></script>
 </body>
+
 </html>

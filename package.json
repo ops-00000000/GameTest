@@ -11,6 +11,7 @@
     "dev:server": "cd server && npx wrangler dev",
     "dev:client": "cd client && npm run dev",
     "build:shared": "cd packages/shared && npm run build",
-    "build": "npm run build:shared && cd client && npm run build"
+    "build": "npm run build:shared && cd client && npm run build",
+    "deploy": "npm run build:shared && cd server && npx wrangler deploy"
   }
 }
