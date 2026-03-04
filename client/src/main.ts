@@ -175,6 +175,10 @@ function handleServerMessage(msg: ServerMessage): void {
             break;
         }
         case 'turn_result': {
+            // Queue animations before updating view (so old positions are visible during anim)
+            if (msg.events && msg.events.length > 0) {
+                renderer.queueAnimations(msg.events);
+            }
             state.updateView(msg.view);
             updateValidMoves();
             updateHUD();
