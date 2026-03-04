@@ -39,6 +39,11 @@ const $chatInput = document.getElementById('chat-input') as HTMLInputElement;
 const $btnChatSend = document.getElementById('btn-chat-send')!;
 const $upgradeModal = document.getElementById('upgrade-modal')!;
 const $upgradeOptions = document.getElementById('upgrade-options')!;
+const $defeatModal = document.getElementById('defeat-modal')!;
+const $defeatCaptures = document.getElementById('defeat-captures')!;
+const $defeatUpgrades = document.getElementById('defeat-upgrades')!;
+const $defeatTurns = document.getElementById('defeat-turns')!;
+const $btnRestart = document.getElementById('btn-restart')!;
 
 // ── State ─────────────────────────────────────────
 
@@ -113,6 +118,11 @@ function init(): void {
         }
     });
 
+    // Restart
+    $btnRestart.addEventListener('click', () => {
+        location.reload();
+    });
+
     // Start render loop
     renderLoop();
 }
@@ -168,6 +178,10 @@ function handleServerMessage(msg: ServerMessage): void {
             state.updateView(msg.view);
             updateValidMoves();
             updateHUD();
+            // Check defeat
+            if (msg.view.myPiece && !msg.view.myPiece.alive) {
+                showDefeatScreen(msg.view.myPiece.captures, msg.view.myPiece.upgrades.length, msg.view.turnNumber);
+            }
             break;
         }
         case 'player_joined': {
@@ -344,6 +358,15 @@ function showUpgradeModal(options: Upgrade[]): void {
             $upgradeModal.classList.add('hidden');
         });
     });
+}
+
+// ── Defeat Screen ─────────────────────────────────
+
+function showDefeatScreen(captures: number, upgrades: number, turns: number): void {
+    $defeatCaptures.textContent = String(captures);
+    $defeatUpgrades.textContent = String(upgrades);
+    $defeatTurns.textContent = String(turns);
+    $defeatModal.classList.remove('hidden');
 }
 
 // ── Render Loop ───────────────────────────────────

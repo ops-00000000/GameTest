@@ -100,7 +100,22 @@
     </div>
   </div>
 
-  <!-- ═══ Connection Status ═══ -->
+  <!-- ═══ Defeat Modal ═══ -->
+  <div id="defeat-modal" class="modal hidden">
+    <div class="modal-content defeat-content">
+      <div class="defeat-icon">💀</div>
+      <h2>Поражение!</h2>
+      <p>Ваша пешка была захвачена.</p>
+      <div class="defeat-stats">
+        <div class="defeat-stat"><span>⚔️ Захватов:</span> <strong id="defeat-captures">0</strong></div>
+        <div class="defeat-stat"><span>🔧 Апгрейдов:</span> <strong id="defeat-upgrades">0</strong></div>
+        <div class="defeat-stat"><span>🎯 Ходов:</span> <strong id="defeat-turns">0</strong></div>
+      </div>
+      <button id="btn-restart" class="btn-primary">
+        <span class="btn-icon">♟</span> Играть снова
+      </button>
+    </div>
+  </div>
   <div id="connection-status" class="connection-status hidden">
     <span id="connection-text">Подключение...</span>
   </div>

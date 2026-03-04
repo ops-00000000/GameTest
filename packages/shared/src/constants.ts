@@ -4,12 +4,12 @@
 
 import { Upgrade } from './types.js';
 
-/** Default dungeon dimensions (in tiles) */
-export const MAP_WIDTH = 48;
-export const MAP_HEIGHT = 32;
+/** Chessboard dimensions */
+export const MAP_WIDTH = 16;
+export const MAP_HEIGHT = 16;
 
 /** Tile size in pixels for rendering */
-export const TILE_SIZE = 24;
+export const TILE_SIZE = 48;
 
 /** Max players per room */
 export const MAX_PLAYERS = 4;
@@ -20,18 +20,9 @@ export const BASE_VIEW_RADIUS = 5;
 /** Turn timeout in ms (30 seconds) */
 export const TURN_TIMEOUT_MS = 30_000;
 
-/** BSP dungeon generation params */
-export const DUNGEON = {
-    MIN_ROOM_SIZE: 4,
-    MAX_ROOM_SIZE: 10,
-    MIN_ROOMS: 6,
-    MAX_ROOMS: 12,
-    CORRIDOR_WIDTH: 1,
-    BSP_MIN_LEAF: 6,
-} as const;
 
-/** Enemy count scaling per floor */
-export const ENEMIES_PER_FLOOR = (floor: number) => 3 + Math.floor(floor * 1.5);
+/** Enemy count — lots of pieces on the board */
+export const ENEMIES_PER_FLOOR = (floor: number) => 8 + Math.floor(floor * 3);
 
 /** Captures needed per upgrade */
 export const CAPTURES_PER_UPGRADE = 3;
