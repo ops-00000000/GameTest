@@ -78,12 +78,14 @@ function getSlidingMoves(
     map: DungeonMap,
     occupiedByFriendly: Set<string>,
     occupiedByEnemy: Set<string>,
+    maxSteps: number = 99,
 ): Position[] {
     const result: Position[] = [];
     for (const [dx, dy] of directions) {
         let cx = pos.x + dx;
         let cy = pos.y + dy;
-        while (isInBounds(cx, cy, map)) {
+        let steps = 0;
+        while (isInBounds(cx, cy, map) && steps < maxSteps) {
             if (!isWalkable(cx, cy, map)) break;
             const key = `${cx},${cy}`;
             if (occupiedByFriendly.has(key)) break;
@@ -91,6 +93,7 @@ function getSlidingMoves(
             if (occupiedByEnemy.has(key)) break; // can capture but can't go further
             cx += dx;
             cy += dy;
+            steps++;
         }
     }
     return result;
@@ -157,14 +160,14 @@ export function getPlayerMoves(
         addUnique(getOffsetMoves(pos, KNIGHT_OFFSETS, map, friendlySet));
     }
 
-    // Upgrade: Bishop Slide
+    // Upgrade: Bishop Slide (max 3 tiles)
     if (upgrades.includes(Upgrade.BishopSlide)) {
-        addUnique(getSlidingMoves(pos, DIAGONAL_DIRS, map, friendlySet, enemySet));
+        addUnique(getSlidingMoves(pos, DIAGONAL_DIRS, map, friendlySet, enemySet, 3));
     }
 
-    // Upgrade: Rook Rush
+    // Upgrade: Rook Rush (max 3 tiles)
     if (upgrades.includes(Upgrade.RookRush)) {
-        addUnique(getSlidingMoves(pos, STRAIGHT_DIRS, map, friendlySet, enemySet));
+        addUnique(getSlidingMoves(pos, STRAIGHT_DIRS, map, friendlySet, enemySet, 3));
     }
 
     // Upgrade: Double Step — move 2 tiles forward (must have clear path)

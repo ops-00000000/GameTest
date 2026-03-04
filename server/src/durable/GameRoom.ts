@@ -274,7 +274,14 @@ export class GameRoom implements DurableObject {
         this.markPlayerActed(conn.playerId);
         this.turnEvents.push(...events);
         this.broadcastPhaseStatus();
-        await this.checkAllPlayersActed();
+
+        // Check if all enemies cleared → next level
+        const aliveEnemies = this.gameState.enemies.filter(e => e.alive);
+        if (aliveEnemies.length === 0) {
+            await this.advanceToNextFloor();
+        } else {
+            await this.checkAllPlayersActed();
+        }
         await this.saveState();
     }
 
@@ -486,6 +493,46 @@ export class GameRoom implements DurableObject {
             playersReady: this.gameState.playersActed.length,
             playersTotal: alivePlayers.length,
         });
+    }
+
+    /** Advance to next floor when all enemies are cleared */
+    private async advanceToNextFloor(): Promise<void> {
+        if (!this.gameState) return;
+
+        const nextFloor = this.gameState.floor + 1;
+        this.addLog(`🏆 Уровень ${this.gameState.floor} пройден!`);
+        this.addLog(`━━━ Уровень ${nextFloor} ━━━`);
+
+        // Generate new map and enemies
+        const newSeed = this.seed + nextFloor * 1000;
+        const newMap = generateDungeon(nextFloor, newSeed);
+        const newEnemies = generateEnemies(newMap, nextFloor, newSeed);
+        const spawnPos = getSpawnPosition(newMap);
+
+        this.gameState.floor = nextFloor;
+        this.gameState.map = newMap;
+        this.gameState.enemies = newEnemies;
+
+        // Respawn all alive players at bottom center
+        for (const player of this.gameState.players) {
+            if (player.alive) {
+                player.pos = { ...spawnPos };
+                player.floor = nextFloor;
+            }
+        }
+
+        // Reset turn state
+        this.gameState.playersActed = [];
+        this.gameState.phase = 'players';
+        this.gameState.turnNumber++;
+
+        // Broadcast fresh snapshots to everyone
+        for (const [ws, conn] of this.connections) {
+            const view = this.buildClientView(conn.playerId);
+            this.send(ws, { type: 'snapshot', view, roomId: this.gameState.roomId, playerId: conn.playerId });
+        }
+
+        this.setTurnTimeout();
     }
 
     private broadcastPhaseStatus(): void {
